@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,14 +7,19 @@ import {
   SafeAreaView,
   StatusBar,
   Image,
-  Alert,
 } from "react-native";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
+import AppModal from "../components/AppModal";
+
+const MAX_PIN_ATTEMPTS = 3;
 
 export default function LoginScreen() {
   const { setCurrentScreen, userPin } = useAuth();
   const [pin, setPin] = useState("");
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [warningVisible, setWarningVisible] = useState(false);
+  const [isAccountLocked, setIsAccountLocked] = useState(false);
   // Estado para los 10 dígitos del teclado de seguridad (Inicializado fiel a Figma)
   const [keypadNumbers, setKeypadNumbers] = useState([
     "0", "3", "6",
@@ -24,7 +29,7 @@ export default function LoginScreen() {
   ]);
 
   // Función para aleatorizar los números del teclado por seguridad
-  const shuffleNumbers = () => {
+  const shuffleNumbers = useCallback(() => {
     setKeypadNumbers((prevNumbers) => {
       const arr = [...prevNumbers];
       for (let i = arr.length - 1; i > 0; i--) {
@@ -33,52 +38,91 @@ export default function LoginScreen() {
       }
       return arr;
     });
-  };
+  }, []);
 
   // Temporizador para cambiar el orden de los números automáticamente cada 1 minuto (60,000 ms)
   useEffect(() => {
+    shuffleNumbers();
+
     const interval = setInterval(() => {
       shuffleNumbers();
     }, 60000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [shuffleNumbers]);
 
-  const handleKeyPress = (num) => {
+  const handleKeyPress = useCallback((num) => {
+    if (isAccountLocked) {
+      setWarningVisible(true);
+      return;
+    }
+
     if (pin.length < 6) {
       const newPin = pin + num;
       setPin(newPin);
       if (newPin.length === 6) {
         setTimeout(() => {
           if (newPin === userPin || newPin === "123456") {
+            setFailedAttempts(0);
             setPin("");
             setCurrentScreen("HOME");
           } else {
-            Alert.alert("Clave incorrecta", "La clave ingresada es incorrecta. Por favor intenta de nuevo.");
+            const nextAttempts = failedAttempts + 1;
+            setFailedAttempts(nextAttempts);
+            setIsAccountLocked(nextAttempts >= MAX_PIN_ATTEMPTS);
+            setWarningVisible(true);
             setPin("");
+            shuffleNumbers();
           }
         }, 150);
       }
     }
-  };
+  }, [
+    failedAttempts,
+    isAccountLocked,
+    pin,
+    setCurrentScreen,
+    shuffleNumbers,
+    userPin,
+  ]);
 
-  const handleDelete = () => {
+  const handleDelete = useCallback(() => {
     if (pin.length > 0) {
       setPin(pin.slice(0, -1));
     }
-  };
+  }, [pin]);
 
-  const handleFaceId = () => {
+  const handleFaceId = useCallback(() => {
+    if (isAccountLocked) {
+      setWarningVisible(true);
+      return;
+    }
+
     setCurrentScreen("HOME");
-  };
+  }, [isAccountLocked, setCurrentScreen]);
+
+  const remainingAttempts = Math.max(MAX_PIN_ATTEMPTS - failedAttempts, 0);
+
+  const handleRecoverFromLock = useCallback(() => {
+    setWarningVisible(false);
+    setCurrentScreen("RECOVERY_EMAIL");
+  }, [setCurrentScreen]);
+
+  const handleSupportFromLock = useCallback(() => {
+    setWarningVisible(false);
+    setCurrentScreen("SUPPORT");
+  }, [setCurrentScreen]);
 
   // Estructura de filas alineada en 3 columnas perfectamente simétricas
-  const rows = [
-    [keypadNumbers[0], keypadNumbers[1], keypadNumbers[2]],
-    [keypadNumbers[3], keypadNumbers[4], keypadNumbers[5]],
-    [keypadNumbers[6], keypadNumbers[7], keypadNumbers[8]],
-    ["FACE_ID", keypadNumbers[9], "DELETE"],
-  ];
+  const rows = useMemo(
+    () => [
+      [keypadNumbers[0], keypadNumbers[1], keypadNumbers[2]],
+      [keypadNumbers[3], keypadNumbers[4], keypadNumbers[5]],
+      [keypadNumbers[6], keypadNumbers[7], keypadNumbers[8]],
+      ["FACE_ID", keypadNumbers[9], "DELETE"],
+    ],
+    [keypadNumbers]
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -191,8 +235,12 @@ export default function LoginScreen() {
                 return (
                   <TouchableOpacity
                     key={colIndex}
-                    style={styles.keypadBtn}
+                    style={[
+                      styles.keypadBtn,
+                      isAccountLocked && styles.keypadBtnDisabled,
+                    ]}
                     onPress={() => handleKeyPress(btnKey)}
+                    disabled={isAccountLocked}
                     activeOpacity={0.8}
                   >
                     <Text style={styles.keypadBtnText}>{btnKey}</Text>
@@ -203,6 +251,26 @@ export default function LoginScreen() {
           ))}
         </View>
       </View>
+
+      <AppModal
+        visible={warningVisible}
+        icon={isAccountLocked ? "lock" : "alert-triangle"}
+        title={isAccountLocked ? "Cuenta bloqueada" : "Clave incorrecta"}
+        message={
+          isAccountLocked
+            ? "Superaste los 3 intentos permitidos. Para proteger tu cuenta, bloqueamos el ingreso por clave."
+            : `La clave ingresada no coincide. Te quedan ${remainingAttempts} intento${remainingAttempts === 1 ? "" : "s"}.`
+        }
+        primaryLabel={isAccountLocked ? "Recuperar clave" : "Intentar de nuevo"}
+        onPrimary={
+          isAccountLocked
+            ? handleRecoverFromLock
+            : () => setWarningVisible(false)
+        }
+        secondaryLabel={isAccountLocked ? "Centro de ayuda" : undefined}
+        onSecondary={isAccountLocked ? handleSupportFromLock : undefined}
+        onClose={() => setWarningVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -235,18 +303,18 @@ const styles = StyleSheet.create({
   actionCardsRow: {
     flexDirection: "row",
     justifyContent: "center",
-    gap: 36,
-    marginBottom: 28,
+    gap: 30,
+    marginBottom: 24,
   },
   actionItemWrapper: {
     alignItems: "center",
-    width: 100,
+    width: 88,
   },
   actionSquareBox: {
-    width: 85,
-    height: 85,
+    width: 72,
+    height: 72,
     backgroundColor: "#FFF5EB",
-    borderRadius: 24,
+    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 8,
@@ -259,8 +327,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   cardIconImg: {
-    width: 40,
-    height: 40,
+    width: 32,
+    height: 32,
   },
   actionItemText: {
     fontSize: 12,
@@ -314,6 +382,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginHorizontal: 6,
+  },
+  keypadBtnDisabled: {
+    opacity: 0.5,
   },
   keypadBtnText: {
     fontSize: 28,

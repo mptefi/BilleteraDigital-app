@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -6,9 +6,11 @@ import {
   TouchableOpacity,
   SafeAreaView,
   StatusBar,
-  ScrollView,
   Image,
-  Alert,
+  FlatList,
+  TextInput,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import {
   Feather,
@@ -17,6 +19,22 @@ import {
 } from "@expo/vector-icons";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
+import { fetchExchangeRates } from "../services/api";
+import {
+  getStoredJson,
+  setStoredJson,
+  storageKeys,
+} from "../services/storage";
+import TransactionRow from "../components/TransactionRow";
+import EmptyState from "../components/EmptyState";
+import RetryState from "../components/RetryState";
+import AppModal from "../components/AppModal";
+
+const filterOptions = [
+  { id: "all", label: "Todos" },
+  { id: "income", label: "Ingresos" },
+  { id: "expense", label: "Gastos" },
+];
 
 export default function HomeScreen() {
   const {
@@ -28,17 +46,124 @@ export default function HomeScreen() {
     transactions,
   } = useAuth();
   const [activeTab, setActiveTab] = useState("inicio");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedFilter, setSelectedFilter] = useState("all");
+  const [rates, setRates] = useState([]);
+  const [ratesLoading, setRatesLoading] = useState(true);
+  const [ratesError, setRatesError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [modalConfig, setModalConfig] = useState(null);
 
-  const formattedBalance = showBalance
-    ? `S/ ${balance.toLocaleString("es-PE", { minimumFractionDigits: 2 })}`
-    : "S/ ••••••";
+  const showInfoModal = useCallback((config) => {
+    setModalConfig(config);
+  }, []);
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+  const formattedBalance = useMemo(() => {
+    if (!showBalance) {
+      return "S/ ******";
+    }
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Cabecera Superior: Usuario, Ayuda, Notificaciones */}
+    return `S/ ${balance.toLocaleString("es-PE", {
+      minimumFractionDigits: 2,
+    })}`;
+  }, [balance, showBalance]);
+
+  const filteredTransactions = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    return transactions.filter((item) => {
+      const matchesFilter =
+        selectedFilter === "all" || item.type === selectedFilter;
+      const matchesSearch =
+        normalizedQuery.length === 0 ||
+        item.title.toLowerCase().includes(normalizedQuery) ||
+        item.date.toLowerCase().includes(normalizedQuery) ||
+        item.amount.toLowerCase().includes(normalizedQuery);
+
+      return matchesFilter && matchesSearch;
+    });
+  }, [searchQuery, selectedFilter, transactions]);
+
+  const totals = useMemo(
+    () =>
+      transactions.reduce(
+        (acc, item) => {
+          if (item.type === "income") {
+            acc.income += 1;
+          } else {
+            acc.expense += 1;
+          }
+          return acc;
+        },
+        { income: 0, expense: 0 }
+      ),
+    [transactions]
+  );
+
+  const loadRates = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setRatesLoading(true);
+    }
+    setRatesError("");
+
+    try {
+      const data = await fetchExchangeRates();
+      setRates(data);
+      setStoredJson(storageKeys.offers, data);
+    } catch (error) {
+      const cachedRates = await getStoredJson(storageKeys.offers, []);
+      if (cachedRates.length > 0) {
+        setRates(cachedRates);
+      }
+      setRatesError("No pudimos actualizar el tipo de cambio.");
+    } finally {
+      setRatesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRates();
+  }, [loadRates]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadRates({ silent: true });
+    setRefreshing(false);
+  }, [loadRates]);
+
+  const renderTransaction = useCallback(
+    ({ item, index }) => (
+      <View style={styles.transactionRowShell}>
+        <TransactionRow
+          item={item}
+          isLast={index === filteredTransactions.length - 1}
+        />
+      </View>
+    ),
+    [filteredTransactions.length]
+  );
+
+  const keyExtractor = useCallback((item) => item.id, []);
+
+  const renderRateCard = useCallback(
+    (item) => (
+      <View key={item.id} style={styles.rateCard}>
+        <View style={[styles.rateAccent, { backgroundColor: item.accent }]} />
+        <View style={styles.rateIconCircle}>
+          <Feather name={item.icon} size={18} color={COLORS.primary} />
+        </View>
+        <View style={styles.rateTextBox}>
+          <Text style={styles.rateTitle}>{item.title}</Text>
+          <Text style={styles.rateDescription}>{item.description}</Text>
+        </View>
+      </View>
+    ),
+    []
+  );
+
+  const ListHeader = useMemo(
+    () => (
+      <View>
         <View style={styles.topHeader}>
           <View style={styles.userInfo}>
             <View style={styles.avatarWrapper}>
@@ -48,7 +173,7 @@ export default function HomeScreen() {
               <View style={styles.onlineDot} />
             </View>
             <View>
-              <Text style={styles.greetingText}>¡Hola, buenas tardes!</Text>
+              <Text style={styles.greetingText}>Hola, buenas tardes</Text>
               <Text style={styles.userNameText}>{userName}</Text>
             </View>
           </View>
@@ -68,7 +193,13 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               style={styles.iconBadgeBtn}
-              onPress={() => Alert.alert("Notificaciones", "No tienes notificaciones pendientes.")}
+              onPress={() =>
+                showInfoModal({
+                  icon: "bell",
+                  title: "Notificaciones",
+                  message: "No tienes notificaciones pendientes.",
+                })
+              }
               activeOpacity={0.7}
             >
               <Feather name="bell" size={20} color={COLORS.textPrimary} />
@@ -77,10 +208,12 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Tarjeta de Saldo Naranja */}
         <View style={styles.balanceCard}>
           <View style={styles.balanceHeader}>
-            <TouchableOpacity style={styles.saldoToggleRow} onPress={toggleBalanceVisibility}>
+            <TouchableOpacity
+              style={styles.saldoToggleRow}
+              onPress={toggleBalanceVisibility}
+            >
               <Text style={styles.saldoLabel}>Saldo disponible</Text>
               <Feather
                 name={showBalance ? "eye" : "eye-off"}
@@ -91,7 +224,12 @@ export default function HomeScreen() {
             </TouchableOpacity>
 
             <View style={styles.billeteraBadge}>
-              <Feather name="mail" size={14} color={COLORS.white} style={{ marginRight: 4 }} />
+              <Feather
+                name="mail"
+                size={14}
+                color={COLORS.white}
+                style={{ marginRight: 4 }}
+              />
               <Text style={styles.billeteraBadgeText}>Billetera</Text>
             </View>
           </View>
@@ -99,11 +237,16 @@ export default function HomeScreen() {
           <Text style={styles.balanceAmountText}>{formattedBalance}</Text>
         </View>
 
-        {/* Acciones Rápidas (4 Botones Circulares) con promociones.png */}
         <View style={styles.quickActionsRow}>
           <TouchableOpacity
             style={styles.actionItem}
-            onPress={() => Alert.alert("Transferir", "Módulo de transferencia rápida.")}
+            onPress={() =>
+              showInfoModal({
+                icon: "arrow-up-right",
+                title: "Transferir",
+                message: "Modulo de transferencia rapida.",
+              })
+            }
           >
             <View style={styles.actionCircle}>
               <Feather name="arrow-up-right" size={24} color={COLORS.primary} />
@@ -113,12 +256,18 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={styles.actionItem}
-            onPress={() => Alert.alert("Promos", "Revisa tus promociones exclusivas.")}
+            onPress={() =>
+              showInfoModal({
+                icon: "gift",
+                title: "Promos",
+                message: "Revisa tus promociones exclusivas.",
+              })
+            }
           >
             <View style={styles.actionCircle}>
               <Image
                 source={require("../../mockups/promociones.png")}
-                style={styles.promoIconImg}
+                style={[styles.promoIconImg, { tintColor: COLORS.primary }]}
                 resizeMode="contain"
               />
             </View>
@@ -127,7 +276,13 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={styles.actionItem}
-            onPress={() => Alert.alert("Aprobar compras", "Aprobación de compras pendientes.")}
+            onPress={() =>
+              showInfoModal({
+                icon: "shield",
+                title: "Aprobar compras",
+                message: "Aprobacion de compras pendientes.",
+              })
+            }
           >
             <View style={styles.actionCircle}>
               <Feather name="shield" size={22} color={COLORS.primary} />
@@ -137,7 +292,13 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={styles.actionItem}
-            onPress={() => Alert.alert("Servicios", "Pago de luz, agua y servicios.")}
+            onPress={() =>
+              showInfoModal({
+                icon: "file-text",
+                title: "Servicios",
+                message: "Pago de luz, agua y servicios.",
+              })
+            }
           >
             <View style={styles.actionCircle}>
               <Feather name="file-text" size={22} color={COLORS.primary} />
@@ -146,15 +307,24 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Banner Exclusivo Cashback */}
         <View style={styles.promoBannerCard}>
           <View style={styles.promoIndicator} />
           <View style={styles.promoBody}>
             <Text style={styles.promoTag}>EXCLUSIVO</Text>
-            <Text style={styles.promoTitle}>¡Gana hasta 15% cashback!</Text>
-            <Text style={styles.promoSub}>Comprando los viernes en locales seleccionados.</Text>
-            <TouchableOpacity onPress={() => Alert.alert("Cashback", "Términos y condiciones del cashback.")}>
-              <Text style={styles.promoLink}>Ver más</Text>
+            <Text style={styles.promoTitle}>Gana hasta 15% cashback</Text>
+            <Text style={styles.promoSub}>
+              Comprando los viernes en locales seleccionados.
+            </Text>
+            <TouchableOpacity
+              onPress={() =>
+                showInfoModal({
+                  icon: "gift",
+                  title: "Cashback",
+                  message: "Terminos y condiciones del cashback.",
+                })
+              }
+            >
+              <Text style={styles.promoLink}>Ver mas</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.promoCoinBadge}>
@@ -162,50 +332,153 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Sección Últimos Movimientos */}
+        <View style={styles.apiSectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Tipo de cambio</Text>
+            <Text style={styles.sectionSubtitle}>
+              Actualizado desde una API REST publica
+            </Text>
+          </View>
+          {ratesLoading ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : null}
+        </View>
+
+        {ratesError && rates.length === 0 ? (
+          <RetryState
+            message={ratesError}
+            onRetry={() => loadRates()}
+            loading={ratesLoading}
+          />
+        ) : (
+          <View style={styles.ratesList}>{rates.map(renderRateCard)}</View>
+        )}
+
+        {ratesError && rates.length > 0 ? (
+          <Text style={styles.cacheWarning}>
+            Mostrando ultimo dato guardado. Desliza para reintentar.
+          </Text>
+        ) : null}
+
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Últimos movimientos</Text>
+          <View>
+            <Text style={styles.sectionTitle}>Ultimos movimientos</Text>
+            <Text style={styles.sectionSubtitle}>
+              {transactions.length} total · {totals.income} ingresos ·{" "}
+              {totals.expense} gastos
+            </Text>
+          </View>
           <TouchableOpacity onPress={() => setActiveTab("movimientos")}>
-            <Text style={styles.verTodoText}>Ver todo →</Text>
+            <Text style={styles.verTodoText}>Ver todo</Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.transactionsCard}>
-          {transactions.map((item, index) => {
-            const isIncome = item.type === "income";
+        <View style={styles.searchBar}>
+          <Feather
+            name="search"
+            size={18}
+            color={COLORS.textMuted}
+            style={{ marginRight: 8 }}
+          />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar movimientos"
+            placeholderTextColor={COLORS.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 ? (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Feather name="x" size={18} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <View style={styles.filterRow}>
+          {filterOptions.map((option) => {
+            const isActive = selectedFilter === option.id;
             return (
-              <View key={item.id}>
-                <View style={styles.transactionRow}>
-                  <View style={styles.txIconCircle}>
-                    {item.icon === "user" && <Feather name="user" size={20} color={COLORS.textSecondary} />}
-                    {item.icon === "signal" && <Feather name="bar-chart-2" size={20} color={COLORS.textSecondary} />}
-                    {item.icon === "download" && <Feather name="download" size={20} color={COLORS.success} />}
-                    {item.icon === "coffee" && <Feather name="coffee" size={20} color={COLORS.textSecondary} />}
-                  </View>
-
-                  <View style={styles.txDetails}>
-                    <Text style={styles.txTitle}>{item.title}</Text>
-                    <Text style={styles.txDate}>{item.date}</Text>
-                  </View>
-
-                  <Text
-                    style={[
-                      styles.txAmount,
-                      isIncome ? styles.txAmountIncome : styles.txAmountExpense,
-                    ]}
-                  >
-                    {item.amount}
-                  </Text>
-                </View>
-
-                {index < transactions.length - 1 && <View style={styles.txDivider} />}
-              </View>
+              <TouchableOpacity
+                key={option.id}
+                style={[styles.filterChip, isActive && styles.filterChipActive]}
+                onPress={() => setSelectedFilter(option.id)}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    isActive && styles.filterChipTextActive,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
             );
           })}
         </View>
-      </ScrollView>
 
-      {/* Barra de Navegación Inferior */}
+        <View style={styles.transactionsCard}>
+          {filteredTransactions.length === 0 ? (
+            <EmptyState
+              icon="search"
+              title="Sin movimientos"
+              message="Prueba otro texto o cambia el filtro seleccionado."
+            />
+          ) : null}
+        </View>
+      </View>
+    ),
+    [
+      userName,
+      setCurrentScreen,
+      showInfoModal,
+      toggleBalanceVisibility,
+      showBalance,
+      formattedBalance,
+      ratesLoading,
+      ratesError,
+      rates,
+      renderRateCard,
+      loadRates,
+      transactions.length,
+      totals.income,
+      totals.expense,
+      searchQuery,
+      selectedFilter,
+      filteredTransactions.length,
+    ]
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+
+      <FlatList
+        data={filteredTransactions}
+        keyExtractor={keyExtractor}
+        renderItem={renderTransaction}
+        ListHeaderComponent={ListHeader}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        getItemLayout={(_, index) => ({
+          length: 69,
+          offset: 69 * index,
+          index,
+        })}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[COLORS.primary]}
+            tintColor={COLORS.primary}
+          />
+        }
+        ListFooterComponent={<View style={styles.footerSpacer} />}
+      />
+
       <View style={styles.tabBarContainer}>
         <TouchableOpacity
           style={styles.tabItem}
@@ -233,7 +506,9 @@ export default function HomeScreen() {
           <Feather
             name="list"
             size={24}
-            color={activeTab === "movimientos" ? COLORS.primary : COLORS.textMuted}
+            color={
+              activeTab === "movimientos" ? COLORS.primary : COLORS.textMuted
+            }
           />
           <Text
             style={[
@@ -245,13 +520,22 @@ export default function HomeScreen() {
           </Text>
         </TouchableOpacity>
 
-        {/* Botón Flotante Central QR */}
         <TouchableOpacity
           style={styles.qrButtonFab}
-          onPress={() => Alert.alert("Escáner QR Al Toque", "Escanea un código QR para pagar o cobras al instante.")}
+          onPress={() =>
+            showInfoModal({
+              icon: "camera",
+              title: "Escaner QR Al Toque",
+              message: "Escanea un codigo QR para pagar o cobrar al instante.",
+            })
+          }
           activeOpacity={0.85}
         >
-          <MaterialCommunityIcons name="qrcode-scan" size={26} color={COLORS.white} />
+          <MaterialCommunityIcons
+            name="qrcode-scan"
+            size={26}
+            color={COLORS.white}
+          />
           <Text style={styles.qrFabLabel}>QR</Text>
         </TouchableOpacity>
 
@@ -282,6 +566,16 @@ export default function HomeScreen() {
           <Text style={styles.tabLabel}>Salir</Text>
         </TouchableOpacity>
       </View>
+
+      <AppModal
+        visible={Boolean(modalConfig)}
+        icon={modalConfig?.icon}
+        title={modalConfig?.title}
+        message={modalConfig?.message}
+        primaryLabel="Entendido"
+        onPrimary={() => setModalConfig(null)}
+        onClose={() => setModalConfig(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -291,7 +585,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FBFBFB",
   },
-  scrollContent: {
+  listContent: {
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 100,
@@ -459,7 +753,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 16,
     alignItems: "center",
-    marginBottom: 28,
+    marginBottom: 24,
     borderWidth: 1,
     borderColor: "#EFEFEF",
     position: "relative",
@@ -513,6 +807,61 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  apiSectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  ratesList: {
+    gap: 10,
+    marginBottom: 24,
+  },
+  rateCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#EFEFEF",
+    padding: 14,
+    overflow: "hidden",
+  },
+  rateAccent: {
+    width: 4,
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+  },
+  rateIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  rateTextBox: {
+    flex: 1,
+  },
+  rateTitle: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: COLORS.textPrimary,
+    marginBottom: 2,
+  },
+  rateDescription: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  cacheWarning: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: -14,
+    marginBottom: 20,
+  },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -524,59 +873,83 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: COLORS.textPrimary,
   },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
   verTodoText: {
     fontSize: 14,
     fontWeight: "bold",
     color: COLORS.primary,
   },
-  transactionsCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: "#EFEFEF",
-  },
-  transactionRow: {
+  searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    borderRadius: 16,
+    height: 48,
+    paddingHorizontal: 14,
+    backgroundColor: COLORS.primaryLight,
+    marginBottom: 12,
   },
-  txIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#F6F6F6",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 14,
-  },
-  txDetails: {
+  searchInput: {
     flex: 1,
-  },
-  txTitle: {
     fontSize: 14,
-    fontWeight: "600",
     color: COLORS.textPrimary,
-    marginBottom: 2,
   },
-  txDate: {
+  filterRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  filterChip: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: COLORS.white,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  filterChipText: {
     fontSize: 12,
-    color: COLORS.textMuted,
+    fontWeight: "700",
+    color: COLORS.textSecondary,
   },
-  txAmount: {
-    fontSize: 15,
-    fontWeight: "bold",
+  filterChipTextActive: {
+    color: COLORS.white,
   },
-  txAmountExpense: {
-    color: COLORS.textPrimary,
+  transactionsCard: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: "#EFEFEF",
+    paddingHorizontal: 16,
   },
-  txAmountIncome: {
-    color: COLORS.success,
+  transactionRowShell: {
+    backgroundColor: COLORS.white,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: "#EFEFEF",
+    paddingHorizontal: 16,
   },
-  txDivider: {
-    height: 1,
-    backgroundColor: "#F2F2F2",
+  footerSpacer: {
+    height: 12,
+    backgroundColor: COLORS.white,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#EFEFEF",
+    marginBottom: 20,
   },
   tabBarContainer: {
     position: "absolute",

@@ -8,17 +8,19 @@ import {
   StatusBar,
   TextInput,
   Image,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
+import AppModal from "../components/AppModal";
 
 export default function RecoveryCodeScreen() {
-  const { setCurrentScreen, verifyOtp, userEmail, requestPasswordReset } = useAuth();
+  const { setCurrentScreen, verifyOtp, userEmail, requestPasswordReset } =
+    useAuth();
   const [code, setCode] = useState(["", "", "", ""]);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [isResending, setIsResending] = useState(false);
+  const [modalConfig, setModalConfig] = useState(null);
   const inputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
 
   useEffect(() => {
@@ -50,14 +52,24 @@ export default function RecoveryCodeScreen() {
   const handleVerify = () => {
     const fullCode = code.join("");
     if (fullCode.length < 4) {
-      Alert.alert("Código incompleto", "Por favor ingresa los 4 dígitos del código.");
+      setModalConfig({
+        icon: "key",
+        title: "Codigo incompleto",
+        message: "Por favor ingresa los 4 digitos del codigo.",
+        primaryLabel: "Completar codigo",
+      });
       return;
     }
 
     if (verifyOtp(fullCode)) {
       setCurrentScreen("NEW_PASSWORD");
     } else {
-      Alert.alert("Código inválido", "El código ingresado es incorrecto.");
+      setModalConfig({
+        icon: "alert-triangle",
+        title: "Codigo invalido",
+        message: "El codigo ingresado es incorrecto. Revisa los digitos e intenta nuevamente.",
+        primaryLabel: "Intentar de nuevo",
+      });
     }
   };
 
@@ -68,20 +80,20 @@ export default function RecoveryCodeScreen() {
     const targetEmail = userEmail.trim() || "tu.correo@ejemplo.com";
     await requestPasswordReset(targetEmail);
     setIsResending(false);
-
     setResendCooldown(30);
 
-    Alert.alert(
-      "¡Código reenviado!",
-      `Se ha enviado una nueva solicitud de verificación al correo ${targetEmail}.`
-    );
+    setModalConfig({
+      icon: "send",
+      title: "Codigo reenviado",
+      message: `Se envio una nueva solicitud de verificacion al correo ${targetEmail}.`,
+      primaryLabel: "Entendido",
+    });
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
-      {/* Botón Atrás */}
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => setCurrentScreen("RECOVERY_EMAIL")}
@@ -95,7 +107,6 @@ export default function RecoveryCodeScreen() {
       </TouchableOpacity>
 
       <View style={styles.content}>
-        {/* Icono Grande de Candado Naranja */}
         <View style={styles.lockIconCircle}>
           <View style={styles.lockIconInner}>
             <Image
@@ -106,20 +117,15 @@ export default function RecoveryCodeScreen() {
           </View>
         </View>
 
-        {/* Título y Subtítulo */}
-        <Text style={styles.title}>Codigo de verificación</Text>
+        <Text style={styles.title}>Codigo de verificacion</Text>
         <Text style={styles.subtitle}>Ingresa los 4 digitos</Text>
 
-        {/* Cajas de Código OTP de 4 dígitos */}
         <View style={styles.otpRow}>
           {code.map((digit, index) => (
             <TextInput
               key={index}
               ref={inputRefs[index]}
-              style={[
-                styles.otpBox,
-                digit !== "" && styles.otpBoxActive,
-              ]}
+              style={[styles.otpBox, digit !== "" && styles.otpBoxActive]}
               maxLength={1}
               keyboardType="number-pad"
               value={digit}
@@ -129,7 +135,6 @@ export default function RecoveryCodeScreen() {
           ))}
         </View>
 
-        {/* Opción Reenviar Código con Estilos Originales */}
         <TouchableOpacity
           style={styles.resendLink}
           onPress={handleResend}
@@ -147,7 +152,6 @@ export default function RecoveryCodeScreen() {
           )}
         </TouchableOpacity>
 
-        {/* Botón Verificar */}
         <TouchableOpacity
           style={styles.verifyBtn}
           onPress={handleVerify}
@@ -156,6 +160,16 @@ export default function RecoveryCodeScreen() {
           <Text style={styles.verifyBtnText}>Verificar</Text>
         </TouchableOpacity>
       </View>
+
+      <AppModal
+        visible={Boolean(modalConfig)}
+        icon={modalConfig?.icon}
+        title={modalConfig?.title}
+        message={modalConfig?.message}
+        primaryLabel={modalConfig?.primaryLabel}
+        onPrimary={() => setModalConfig(null)}
+        onClose={() => setModalConfig(null)}
+      />
     </SafeAreaView>
   );
 }

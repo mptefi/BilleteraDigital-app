@@ -8,11 +8,11 @@ import {
   StatusBar,
   TextInput,
   Image,
-  Alert,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
+import AppModal from "../components/AppModal";
 
 export default function NewPasswordScreen() {
   const { setCurrentScreen, updatePin } = useAuth();
@@ -20,36 +20,49 @@ export default function NewPasswordScreen() {
   const [confirmPin, setConfirmPin] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [modalConfig, setModalConfig] = useState(null);
 
   const handleChangePin = () => {
     if (newPin.length !== 6) {
-      Alert.alert("Clave requerida", "La clave debe ser de exactamente 6 dígitos.");
+      setModalConfig({
+        icon: "key",
+        title: "Clave requerida",
+        message: "La clave debe ser de exactamente 6 digitos.",
+        primaryLabel: "Corregir clave",
+      });
       return;
     }
 
     if (newPin !== confirmPin) {
-      Alert.alert("Error de coincidencia", "Las claves ingresadas no coinciden.");
+      setModalConfig({
+        icon: "alert-triangle",
+        title: "Las claves no coinciden",
+        message: "Verifica que la clave nueva y la confirmacion sean iguales.",
+        primaryLabel: "Revisar",
+      });
       return;
     }
 
     updatePin(newPin);
-    Alert.alert(
-      "¡Clave actualizada!",
-      "Tu clave de Al Toque ha sido cambiada con éxito.",
-      [
-        {
-          text: "Iniciar Sesión",
-          onPress: () => setCurrentScreen("LOGIN"),
-        },
-      ]
-    );
+    setModalConfig({
+      icon: "check-circle",
+      title: "Clave actualizada",
+      message: "Tu clave de Al Toque ha sido cambiada con exito.",
+      primaryLabel: "Iniciar sesion",
+      onPrimary: () => setCurrentScreen("LOGIN"),
+    });
+  };
+
+  const handleModalPrimary = () => {
+    const nextAction = modalConfig?.onPrimary;
+    setModalConfig(null);
+    nextAction?.();
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
-      {/* Botón Atrás con Asset PNG */}
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => setCurrentScreen("RECOVERY_CODE")}
@@ -63,17 +76,15 @@ export default function NewPasswordScreen() {
       </TouchableOpacity>
 
       <View style={styles.content}>
-        {/* Título y Subtítulo */}
         <Text style={styles.title}>Clave</Text>
-        <Text style={styles.subtitle}>Crea una clave segura de 6 digictos</Text>
+        <Text style={styles.subtitle}>Crea una clave segura de 6 digitos</Text>
 
-        {/* Input Clave Nueva */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Clave nueva</Text>
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.textInput}
-              placeholder="••••••"
+              placeholder="******"
               placeholderTextColor={COLORS.textMuted}
               secureTextEntry={!showNew}
               keyboardType="number-pad"
@@ -91,13 +102,12 @@ export default function NewPasswordScreen() {
           </View>
         </View>
 
-        {/* Input Confirmar Clave */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Confirmar clave</Text>
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.textInput}
-              placeholder="••••••"
+              placeholder="******"
               placeholderTextColor={COLORS.textMuted}
               secureTextEntry={!showConfirm}
               keyboardType="number-pad"
@@ -115,7 +125,6 @@ export default function NewPasswordScreen() {
           </View>
         </View>
 
-        {/* Botón Cambiar clave */}
         <TouchableOpacity
           style={styles.submitBtn}
           onPress={handleChangePin}
@@ -124,6 +133,16 @@ export default function NewPasswordScreen() {
           <Text style={styles.submitBtnText}>Cambiar clave</Text>
         </TouchableOpacity>
       </View>
+
+      <AppModal
+        visible={Boolean(modalConfig)}
+        icon={modalConfig?.icon}
+        title={modalConfig?.title}
+        message={modalConfig?.message}
+        primaryLabel={modalConfig?.primaryLabel}
+        onPrimary={handleModalPrimary}
+        onClose={() => setModalConfig(null)}
+      />
     </SafeAreaView>
   );
 }

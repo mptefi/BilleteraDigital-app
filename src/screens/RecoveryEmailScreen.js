@@ -8,47 +8,65 @@ import {
   StatusBar,
   TextInput,
   Image,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
+import AppModal from "../components/AppModal";
 
 export default function RecoveryEmailScreen() {
   const { setCurrentScreen, requestPasswordReset } = useAuth();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const [modalConfig, setModalConfig] = useState(null);
+
+  const closeModal = () => setModalConfig(null);
 
   const handleSubmit = async () => {
     if (!email.trim() || !email.includes("@")) {
-      Alert.alert("Correo requerido", "Por favor ingresa un correo electrónico válido.");
+      setModalConfig({
+        icon: "mail",
+        title: "Correo requerido",
+        message: "Por favor ingresa un correo electronico valido.",
+        primaryLabel: "Corregir correo",
+      });
       return;
     }
 
+    const cleanEmail = email.trim();
     setLoading(true);
-    const result = await requestPasswordReset(email.trim());
+    const result = await requestPasswordReset(cleanEmail);
     setLoading(false);
 
     if (result.firebaseSent) {
-      Alert.alert(
-        "¡Correo enviado por Firebase!",
-        `Se ha enviado un correo oficial de restablecimiento a ${email}. Revisa tu bandeja de entrada o SPAM.\n\nA continuación avanzaremos al paso 2 en la app.`,
-        [{ text: "Continuar", onPress: () => setCurrentScreen("RECOVERY_CODE") }]
-      );
+      setModalConfig({
+        icon: "check-circle",
+        title: "Correo enviado por Firebase",
+        message: `Se envio un correo oficial de restablecimiento a ${cleanEmail}. Revisa tu bandeja de entrada o SPAM.`,
+        primaryLabel: "Continuar",
+        onPrimary: () => setCurrentScreen("RECOVERY_CODE"),
+      });
     } else {
-      Alert.alert(
-        "Código enviado",
-        `Se ha generado tu código de verificación para ${email}.`,
-        [{ text: "Continuar al Paso 2", onPress: () => setCurrentScreen("RECOVERY_CODE") }]
-      );
+      setModalConfig({
+        icon: "send",
+        title: "Codigo enviado",
+        message: `Se genero tu codigo de verificacion para ${cleanEmail}.`,
+        primaryLabel: "Continuar al paso 2",
+        onPrimary: () => setCurrentScreen("RECOVERY_CODE"),
+      });
     }
+  };
+
+  const handleModalPrimary = () => {
+    const nextAction = modalConfig?.onPrimary;
+    setModalConfig(null);
+    nextAction?.();
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
 
-      {/* Botón Atrás */}
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => setCurrentScreen("LOGIN")}
@@ -62,7 +80,6 @@ export default function RecoveryEmailScreen() {
       </TouchableOpacity>
 
       <View style={styles.content}>
-        {/* Logo Al Toque */}
         <View style={styles.logoContainer}>
           <Image
             source={require("../../mockups/logo-AT-sinfondo.png")}
@@ -76,14 +93,12 @@ export default function RecoveryEmailScreen() {
           />
         </View>
 
-        {/* Mensaje descriptivo */}
         <Text style={styles.headingText}>
-          ¡Descuida! Te ayudaremos a cambiar tu clave de Al Toque.
+          Descuida, te ayudaremos a cambiar tu clave de Al Toque.
         </Text>
 
-        {/* Campo de Correo Electrónico */}
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Correo electrónico</Text>
+          <Text style={styles.label}>Correo electronico</Text>
           <View style={styles.inputContainer}>
             <Image
               source={require("../../mockups/correo-electronico.png")}
@@ -102,7 +117,6 @@ export default function RecoveryEmailScreen() {
           </View>
         </View>
 
-        {/* Botón de Enviar Código */}
         <TouchableOpacity
           style={styles.submitBtn}
           onPress={handleSubmit}
@@ -112,10 +126,20 @@ export default function RecoveryEmailScreen() {
           {loading ? (
             <ActivityIndicator color={COLORS.white} />
           ) : (
-            <Text style={styles.submitBtnText}>Enviar codigo de verificación</Text>
+            <Text style={styles.submitBtnText}>Enviar codigo de verificacion</Text>
           )}
         </TouchableOpacity>
       </View>
+
+      <AppModal
+        visible={Boolean(modalConfig)}
+        icon={modalConfig?.icon}
+        title={modalConfig?.title}
+        message={modalConfig?.message}
+        primaryLabel={modalConfig?.primaryLabel}
+        onPrimary={handleModalPrimary}
+        onClose={closeModal}
+      />
     </SafeAreaView>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -7,94 +7,130 @@ import {
   SafeAreaView,
   StatusBar,
   TextInput,
-  ScrollView,
   Image,
   Linking,
+  FlatList,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
+import FaqItem from "../components/FaqItem";
+import EmptyState from "../components/EmptyState";
+
+const faqs = [
+  {
+    id: "recover-pin",
+    question: "Olvide mi clave de acceso, como la recupero?",
+    answer:
+      "En la pantalla de inicio selecciona 'Olvidaste tu clave?', ingresa tu correo registrado y sigue el flujo para validar tu identidad.",
+  },
+  {
+    id: "wrong-number",
+    question: "Que hago si envie dinero al numero equivocado?",
+    answer:
+      "Comunicate inmediatamente con soporte por WhatsApp o correo para revisar si la transaccion aun puede ser bloqueada.",
+  },
+  {
+    id: "limits",
+    question: "Cuales son los limites diarios de envio?",
+    answer:
+      "El limite estandar por operacion es de S/ 500.00 y el acumulado diario maximo es de S/ 2,000.00 por seguridad.",
+  },
+  {
+    id: "profile",
+    question: "Como actualizo mis datos registrados?",
+    answer:
+      "Ingresa a la seccion Perfil o Mas dentro del menu principal para modificar telefono, correo o direccion registrada.",
+  },
+];
 
 export default function SupportScreen() {
   const { setCurrentScreen } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [expandedIndex, setExpandedIndex] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const searchInputRef = useRef(null);
 
-  const faqs = [
-    {
-      question: "¿Olvidé mi clave de acceso, cómo la recupero?",
-      answer:
-        "Para recuperar tu clave, en la pantalla de inicio de sesión selecciona '¿Olvidaste tu clave?', ingresa tu correo registrado y sigue el flujo para validar tu identidad.",
-    },
-    {
-      question: "¿Qué hago si envié dinero al número equivocado?",
-      answer:
-        "Comunícate inmediatamente con nuestro centro de atención por WhatsApp o soporte para bloquear la transacción si aún no ha sido cobrada.",
-    },
-    {
-      question: "¿Cuáles son los límites diarios de envío?",
-      answer:
-        "El límite estándar por operación es de S/ 500.00 y el acumulado diario máximo es de S/ 2,000.00 por seguridad.",
-    },
-    {
-      question: "¿Cómo actualizar mis datos registrados?",
-      answer:
-        "Ingresa a la sección 'Más' o 'Perfil' dentro del menú principal para modificar tu teléfono, correo o dirección registrada.",
-    },
-  ];
+  const filteredFaqs = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
 
-  const filteredFaqs = faqs.filter((faq) =>
-    faq.question.toLowerCase().includes(searchQuery.toLowerCase())
+    if (!normalizedQuery) {
+      return faqs;
+    }
+
+    return faqs.filter(
+      (faq) =>
+        faq.question.toLowerCase().includes(normalizedQuery) ||
+        faq.answer.toLowerCase().includes(normalizedQuery)
+    );
+  }, [searchQuery]);
+
+  const toggleAccordion = useCallback((id) => {
+    setExpandedId((currentId) => (currentId === id ? null : id));
+  }, []);
+
+  const handleWhatsApp = useCallback(() => {
+    Linking.openURL(
+      "https://wa.me/51999999999?text=Hola,%20necesito%20ayuda%20con%20Al%20Toque"
+    );
+  }, []);
+
+  const handleReportEmail = useCallback(() => {
+    Linking.openURL(
+      "mailto:soporte@altoque.pe?subject=Reporte%20de%20Problema"
+    );
+  }, []);
+
+  const clearSearch = useCallback(() => {
+    setSearchQuery("");
+    searchInputRef.current?.focus();
+  }, []);
+
+  const renderFaq = useCallback(
+    ({ item }) => (
+      <FaqItem
+        item={item}
+        isExpanded={expandedId === item.id}
+        onToggle={toggleAccordion}
+      />
+    ),
+    [expandedId, toggleAccordion]
   );
 
-  const toggleAccordion = (index) => {
-    setExpandedIndex(expandedIndex === index ? null : index);
-  };
+  const keyExtractor = useCallback((item) => item.id, []);
 
-  const handleWhatsApp = () => {
-    Linking.openURL("https://wa.me/51999999999?text=Hola,%20necesito%20ayuda%20con%20Al%20Toque");
-  };
-
-  const handleReportEmail = () => {
-    Linking.openURL("mailto:soporte@altoque.pe?subject=Reporte%20de%20Problema");
-  };
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-
-      {/* Botón Atrás */}
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => setCurrentScreen("LOGIN")}
-        activeOpacity={0.7}
-      >
-        <Image
-          source={require("../../mockups/atras.png")}
-          style={[styles.backIconImg, { tintColor: COLORS.textPrimary }]}
-          resizeMode="contain"
-        />
-      </TouchableOpacity>
-
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Título */}
+  const ListHeader = useMemo(
+    () => (
+      <View>
         <Text style={styles.title}>Centro de Ayuda</Text>
 
-        {/* Barra de Búsqueda */}
         <View style={styles.searchBar}>
-          <Feather name="search" size={20} color={COLORS.textMuted} style={{ marginRight: 10 }} />
+          <Feather
+            name="search"
+            size={20}
+            color={COLORS.textMuted}
+            style={{ marginRight: 10 }}
+          />
           <TextInput
+            ref={searchInputRef}
             style={styles.searchInput}
-            placeholder="¿En qué podemos ayudarte?"
+            placeholder="En que podemos ayudarte?"
             placeholderTextColor={COLORS.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
+          {searchQuery.length > 0 ? (
+            <TouchableOpacity onPress={clearSearch} activeOpacity={0.7}>
+              <Feather name="x" size={18} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          ) : null}
         </View>
 
-        {/* 2 Tarjetas de Contacto con Iconos Naranja Corporativo */}
         <View style={styles.contactCardsRow}>
-          <TouchableOpacity style={styles.contactCard} onPress={handleWhatsApp} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.contactCard}
+            onPress={handleWhatsApp}
+            activeOpacity={0.7}
+          >
             <View style={styles.contactIconBadge}>
               <Image
                 source={require("../../mockups/auriculares.png")}
@@ -102,11 +138,15 @@ export default function SupportScreen() {
                 resizeMode="contain"
               />
             </View>
-            <Text style={styles.contactCardTitle}>Atención WhatsApp</Text>
+            <Text style={styles.contactCardTitle}>Atencion WhatsApp</Text>
             <Text style={styles.contactCardSub}>Respuesta inmediata</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.contactCard} onPress={handleReportEmail} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.contactCard}
+            onPress={handleReportEmail}
+            activeOpacity={0.7}
+          >
             <View style={styles.contactIconBadge}>
               <Image
                 source={require("../../mockups/correo-electronico.png")}
@@ -115,49 +155,42 @@ export default function SupportScreen() {
               />
             </View>
             <Text style={styles.contactCardTitle}>Reportar problema</Text>
-            <Text style={styles.contactCardSub}>Envíanos un correo</Text>
+            <Text style={styles.contactCardSub}>Envianos un correo</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Sección Preguntas Frecuentes */}
-        <Text style={sectionStyles.sectionTitle}>Preguntas Frecuentes</Text>
+        <Text style={styles.sectionTitle}>Preguntas Frecuentes</Text>
+      </View>
+    ),
+    [clearSearch, handleReportEmail, handleWhatsApp, searchQuery]
+  );
 
-        <View style={styles.faqList}>
-          {filteredFaqs.map((faq, index) => {
-            const isExpanded = expandedIndex === index;
-            return (
-              <View key={index} style={styles.faqCard}>
-                <TouchableOpacity
-                  style={styles.faqHeader}
-                  onPress={() => toggleAccordion(index)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.faqQuestion}>{faq.question}</Text>
-                  <Feather
-                    name={isExpanded ? "chevron-up" : "chevron-down"}
-                    size={22}
-                    color={COLORS.textSecondary}
-                  />
-                </TouchableOpacity>
-                {isExpanded && (
-                  <View style={styles.faqBody}>
-                    <Text style={styles.faqAnswer}>{faq.answer}</Text>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
+  const ListEmpty = useMemo(
+    () => (
+      <EmptyState
+        icon="search"
+        title="Sin resultados"
+        message="Intenta con otra palabra o limpia la busqueda."
+      />
+    ),
+    []
+  );
 
-        {/* Banner de Atención 24/7 */}
+  const ListFooter = useMemo(
+    () => (
+      <View>
         <View style={styles.securityBanner}>
-          <Feather name="lock" size={16} color={COLORS.textSecondary} style={{ marginRight: 8 }} />
+          <Feather
+            name="lock"
+            size={16}
+            color={COLORS.textSecondary}
+            style={{ marginRight: 8 }}
+          />
           <Text style={styles.securityText}>
-            Horario de atención: Lun a Dom 24/7 · Al Toque Seguridad
+            Horario de atencion: Lun a Dom 24/7 - Al Toque Seguridad
           </Text>
         </View>
 
-        {/* Logo Footer */}
         <View style={styles.footerLogoContainer}>
           <Image
             source={require("../../mockups/logo-AT-sinfondo.png")}
@@ -170,19 +203,42 @@ export default function SupportScreen() {
             resizeMode="contain"
           />
         </View>
-      </ScrollView>
+      </View>
+    ),
+    []
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => setCurrentScreen("LOGIN")}
+        activeOpacity={0.7}
+      >
+        <Image
+          source={require("../../mockups/atras.png")}
+          style={[styles.backIconImg, { tintColor: COLORS.textPrimary }]}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
+
+      <FlatList
+        data={filteredFaqs}
+        keyExtractor={keyExtractor}
+        renderItem={renderFaq}
+        ListHeaderComponent={ListHeader}
+        ListEmptyComponent={ListEmpty}
+        ListFooterComponent={ListFooter}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={6}
+        keyboardShouldPersistTaps="handled"
+      />
     </SafeAreaView>
   );
 }
-
-const sectionStyles = StyleSheet.create({
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: COLORS.textPrimary,
-    marginBottom: 14,
-  },
-});
 
 const styles = StyleSheet.create({
   container: {
@@ -266,43 +322,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
   },
-  faqList: {
-    gap: 12,
-    marginBottom: 24,
-  },
-  faqCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#ECECEC",
-    overflow: "hidden",
-  },
-  faqHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  faqQuestion: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
     color: COLORS.textPrimary,
-    paddingRight: 10,
-    lineHeight: 18,
-  },
-  faqBody: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#F5F5F5",
-    paddingTop: 12,
-  },
-  faqAnswer: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    lineHeight: 18,
+    marginBottom: 14,
   },
   securityBanner: {
     flexDirection: "row",
@@ -312,9 +336,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 16,
+    marginTop: 12,
     marginBottom: 24,
   },
   securityText: {
+    flex: 1,
     fontSize: 12,
     color: COLORS.textSecondary,
     fontWeight: "500",
