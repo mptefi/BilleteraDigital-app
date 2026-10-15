@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Image,
   FlatList,
@@ -12,6 +11,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Feather,
   Ionicons,
@@ -37,6 +37,7 @@ const filterOptions = [
 ];
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const {
     setCurrentScreen,
     userName,
@@ -173,7 +174,7 @@ export default function HomeScreen() {
               <View style={styles.onlineDot} />
             </View>
             <View>
-              <Text style={styles.greetingText}>Hola, buenas tardes</Text>
+              <Text style={styles.greetingText}>Hola,</Text>
               <Text style={styles.userNameText}>{userName}</Text>
             </View>
           </View>
@@ -479,7 +480,7 @@ export default function HomeScreen() {
         ListFooterComponent={<View style={styles.footerSpacer} />}
       />
 
-      <View style={styles.tabBarContainer}>
+      <View style={[styles.tabBarContainer, { height: 75 + insets.bottom, paddingBottom: insets.bottom }]}>
         <TouchableOpacity
           style={styles.tabItem}
           onPress={() => setActiveTab("inicio")}
@@ -560,10 +561,10 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.tabItem}
-          onPress={() => setCurrentScreen("LOGIN")}
+          onPress={() => setCurrentScreen("PROFILE")}
         >
           <Feather name="grid" size={24} color={COLORS.textMuted} />
-          <Text style={styles.tabLabel}>Salir</Text>
+          <Text style={styles.tabLabel}>Perfil</Text>
         </TouchableOpacity>
       </View>
 

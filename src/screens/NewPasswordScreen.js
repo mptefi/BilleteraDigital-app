@@ -4,31 +4,37 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   TextInput,
   Image,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
 import AppModal from "../components/AppModal";
 
 export default function NewPasswordScreen() {
-  const { setCurrentScreen, updatePin } = useAuth();
+  const { setCurrentScreen, setupPin, logout } = useAuth();
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [modalConfig, setModalConfig] = useState(null);
+  const [busy, setBusy] = useState(false);
 
-  const handleChangePin = () => {
-    if (newPin.length !== 6) {
+  const handleChangePin = async () => {
+    if (busy) return;
+    if (!/^\d{6}$/.test(newPin)) {
       setModalConfig({
         icon: "key",
-        title: "Clave requerida",
-        message: "La clave debe ser de exactamente 6 digitos.",
-        primaryLabel: "Corregir clave",
+        title: "PIN requerido",
+        message: "El PIN debe tener exactamente 6 dígitos.",
+        primaryLabel: "Corregir PIN",
       });
       return;
     }
@@ -36,21 +42,21 @@ export default function NewPasswordScreen() {
     if (newPin !== confirmPin) {
       setModalConfig({
         icon: "alert-triangle",
-        title: "Las claves no coinciden",
-        message: "Verifica que la clave nueva y la confirmacion sean iguales.",
+        title: "Los PIN no coinciden",
+        message: "Verifica que el PIN nuevo y la confirmación sean iguales.",
         primaryLabel: "Revisar",
       });
       return;
     }
 
-    updatePin(newPin);
-    setModalConfig({
-      icon: "check-circle",
-      title: "Clave actualizada",
-      message: "Tu clave de Al Toque ha sido cambiada con exito.",
-      primaryLabel: "Iniciar sesion",
-      onPrimary: () => setCurrentScreen("LOGIN"),
-    });
+    setBusy(true);
+    try {
+      await setupPin(newPin);
+      setNewPin(""); setConfirmPin("");
+      setCurrentScreen("PIN_LOGIN");
+    } catch (error) {
+      setModalConfig({ icon: "alert-triangle", title: "No se pudo guardar el PIN", message: error.message, primaryLabel: "Entendido" });
+    } finally { setBusy(false); }
   };
 
   const handleModalPrimary = () => {
@@ -65,7 +71,12 @@ export default function NewPasswordScreen() {
 
       <TouchableOpacity
         style={styles.backButton}
-        onPress={() => setCurrentScreen("RECOVERY_CODE")}
+        onPress={async () => {
+          try { await logout(); }
+          catch (error) { setModalConfig({ title: "No se pudo cerrar sesión", message: error.message, primaryLabel: "Entendido" }); }
+        }}
+        disabled={busy}
+        accessibilityLabel="Cerrar sesión y cambiar cuenta"
         activeOpacity={0.7}
       >
         <Image
@@ -73,14 +84,16 @@ export default function NewPasswordScreen() {
           style={styles.backIconImg}
           resizeMode="contain"
         />
+        <Text style={{ color: COLORS.textSecondary, marginLeft: 8 }}>Cambiar cuenta</Text>
       </TouchableOpacity>
 
-      <View style={styles.content}>
-        <Text style={styles.title}>Clave</Text>
-        <Text style={styles.subtitle}>Crea una clave segura de 6 digitos</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Crea tu PIN</Text>
+        <Text style={styles.subtitle}>Elige y confirma 6 dígitos para desbloquear Al Toque en este dispositivo.</Text>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Clave nueva</Text>
+          <Text style={styles.label}>PIN nuevo</Text>
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.textInput}
@@ -90,7 +103,9 @@ export default function NewPasswordScreen() {
               keyboardType="number-pad"
               maxLength={6}
               value={newPin}
-              onChangeText={setNewPin}
+              onChangeText={(value) => setNewPin(value.replace(/\D/g, ""))}
+              editable={!busy}
+              accessibilityLabel="PIN nuevo"
             />
             <TouchableOpacity onPress={() => setShowNew(!showNew)}>
               <Feather
@@ -103,7 +118,7 @@ export default function NewPasswordScreen() {
         </View>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Confirmar clave</Text>
+          <Text style={styles.label}>Confirmar PIN</Text>
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.textInput}
@@ -113,7 +128,9 @@ export default function NewPasswordScreen() {
               keyboardType="number-pad"
               maxLength={6}
               value={confirmPin}
-              onChangeText={setConfirmPin}
+              onChangeText={(value) => setConfirmPin(value.replace(/\D/g, ""))}
+              editable={!busy}
+              accessibilityLabel="Confirmar PIN"
             />
             <TouchableOpacity onPress={() => setShowConfirm(!showConfirm)}>
               <Feather
@@ -128,11 +145,13 @@ export default function NewPasswordScreen() {
         <TouchableOpacity
           style={styles.submitBtn}
           onPress={handleChangePin}
+          disabled={busy}
           activeOpacity={0.8}
         >
-          <Text style={styles.submitBtnText}>Cambiar clave</Text>
+          {busy ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.submitBtnText}>Guardar PIN y continuar</Text>}
         </TouchableOpacity>
-      </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
 
       <AppModal
         visible={Boolean(modalConfig)}
@@ -153,6 +172,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
   },
   backButton: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 20,
     paddingVertical: 14,
   },
@@ -161,9 +182,10 @@ const styles = StyleSheet.create({
     height: 24,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 28,
     paddingTop: 10,
+    paddingBottom: 28,
   },
   title: {
     fontSize: 34,

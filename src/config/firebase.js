@@ -1,5 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, initializeAuth, getReactNativePersistence } from "firebase/auth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 // Configuración de Firebase usando variables de entorno (.env con EXPO_PUBLIC_)
 const firebaseConfig = {
@@ -14,5 +16,16 @@ const firebaseConfig = {
 
 // Inicializar Firebase SDK asegurando instancia única (Singleton)
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
+function createAuth() {
+  if (Platform.OS === "web") return getAuth(app);
+  try {
+    return initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch (error) {
+    if (error.code === "auth/already-initialized") return getAuth(app);
+    throw error;
+  }
+}
+export const auth = createAuth();
 export default app;

@@ -7,11 +7,15 @@ import React, {
   useMemo,
 } from "react";
 import { auth } from "../config/firebase";
-import { sendPasswordResetEmail } from "firebase/auth";
+import { sendPasswordResetEmail, onAuthStateChanged, signInWithEmailAndPassword,
+  createUserWithEmailAndPassword, updateProfile, signOut } from "firebase/auth";
+import { authErrorMessage } from "../services/authErrors";
+import usePinLock from "./usePinLock";
 import {
   getStoredJson,
   setStoredJson,
   storageKeys,
+  removeStoredValue,
 } from "../services/storage";
 
 const AuthContext = createContext();
@@ -53,34 +57,61 @@ const initialTransactions = [
 
 export const AuthProvider = ({ children }) => {
   const [currentScreen, setCurrentScreen] = useState("SPLASH");
-  const [userPin, setUserPin] = useState("123456");
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [profileName, setProfileName] = useState("");
+  const [profileNotice, setProfileNotice] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [showBalance, setShowBalance] = useState(true);
-  const [userName] = useState("Bryan");
+  const userName = profileName || user?.displayName || user?.email?.split("@")[0] || "Usuario";
   const [balance] = useState(1840.5);
   const [recoveryError, setRecoveryError] = useState("");
   const [recoverySuccess, setRecoverySuccess] = useState("");
   const [transactions, setTransactions] = useState(initialTransactions);
   const [isStorageReady, setIsStorageReady] = useState(false);
+  const pinLock = usePinLock(user);
+  const { lockSession, allowPinSetupAfterLogin } = pinLock;
 
   useEffect(() => {
-    const hydrateStoredSession = async () => {
-      const [storedPin, storedShowBalance, storedTransactions] =
-        await Promise.all([
-          getStoredJson(storageKeys.userPin, null),
-          getStoredJson(storageKeys.showBalance, null),
-          getStoredJson(storageKeys.transactions, null),
-        ]);
+    return onAuthStateChanged(auth, (nextUser) => {
+      lockSession();
+      setUser(nextUser);
+      setProfileName(nextUser?.displayName || "");
+      setProfileNotice("");
+      setUserEmail(nextUser?.email || "");
+      setRecoveryError("");
+      setRecoverySuccess("");
+      setIsStorageReady(false);
+      setShowBalance(true);
+      setTransactions(initialTransactions);
+      setCurrentScreen(nextUser ? "HOME" : "LOGIN");
+      setLoading(false);
+    }, () => {
+      setUser(null);
+      setLoading(false);
+      setCurrentScreen("LOGIN");
+    });
+  }, [lockSession]);
 
-      if (typeof storedPin === "string" && storedPin.length === 6) {
-        setUserPin(storedPin);
-      }
+  // El PIN anterior era una demostración local, no una credencial de Firebase.
+  useEffect(() => { removeStoredValue(storageKeys.userPin); }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!user?.uid) return;
+    const hydrateStoredSession = async () => {
+      const [storedShowBalance, storedTransactions] =
+        await Promise.all([
+          getStoredJson(`${storageKeys.showBalance}/${user.uid}`, null),
+          getStoredJson(`${storageKeys.transactions}/${user.uid}`, null),
+        ]);
+      if (!active) return;
 
       if (typeof storedShowBalance === "boolean") {
         setShowBalance(storedShowBalance);
       }
 
-      if (Array.isArray(storedTransactions) && storedTransactions.length > 0) {
+      if (Array.isArray(storedTransactions)) {
         setTransactions(storedTransactions);
       }
 
@@ -88,25 +119,58 @@ export const AuthProvider = ({ children }) => {
     };
 
     hydrateStoredSession();
-  }, []);
+    return () => { active = false; };
+  }, [user?.uid]);
 
   useEffect(() => {
-    if (isStorageReady) {
-      setStoredJson(storageKeys.userPin, userPin);
+    if (isStorageReady && user) {
+      setStoredJson(`${storageKeys.showBalance}/${user.uid}`, showBalance);
     }
-  }, [isStorageReady, userPin]);
+  }, [isStorageReady, showBalance, user?.uid]);
 
   useEffect(() => {
-    if (isStorageReady) {
-      setStoredJson(storageKeys.showBalance, showBalance);
+    if (isStorageReady && user) {
+      setStoredJson(`${storageKeys.transactions}/${user.uid}`, transactions);
     }
-  }, [isStorageReady, showBalance]);
+  }, [isStorageReady, transactions, user?.uid]);
 
-  useEffect(() => {
-    if (isStorageReady) {
-      setStoredJson(storageKeys.transactions, transactions);
+  const login = useCallback(async (email, password) => {
+    try {
+      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+      allowPinSetupAfterLogin(result.user.uid);
+    } catch (error) { throw new Error(authErrorMessage(error)); }
+  }, [allowPinSetupAfterLogin]);
+
+  const register = useCallback(async (name, email, password) => {
+    let result;
+    try {
+      result = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      allowPinSetupAfterLogin(result.user.uid);
+    } catch (error) { throw new Error(authErrorMessage(error)); }
+    try {
+      await updateProfile(result.user, { displayName: name.trim() });
+      if (auth.currentUser?.uid === result.user.uid) setProfileName(name.trim());
+    } catch (error) {
+      if (auth.currentUser?.uid === result.user.uid) {
+        setProfileNotice("Tu cuenta se creó, pero no pudimos guardar tu nombre. Por ahora mostraremos tu correo.");
+      }
     }
-  }, [isStorageReady, transactions]);
+  }, [allowPinSetupAfterLogin]);
+
+  const logout = useCallback(async () => {
+    lockSession();
+    try {
+      await signOut(auth);
+      setUser(null);
+      setProfileName("");
+      setProfileNotice("");
+      setUserEmail("");
+      setShowBalance(true);
+      setTransactions(initialTransactions);
+      setIsStorageReady(false);
+      setCurrentScreen("LOGIN");
+    } catch (error) { throw new Error(authErrorMessage(error)); }
+  }, [lockSession]);
 
   const requestPasswordReset = useCallback(async (email) => {
     setRecoveryError("");
@@ -117,18 +181,14 @@ export const AuthProvider = ({ children }) => {
       setRecoverySuccess("Correo enviado con exito por Firebase");
       return { success: true, firebaseSent: true };
     } catch (error) {
-      console.log("Firebase Auth notification:", error.code || error.message);
-      setRecoverySuccess("Codigo enviado a " + email);
-      return { success: true, firebaseSent: false, errorMsg: error.message };
+      const message = authErrorMessage(error);
+      setRecoveryError(message);
+      return { success: false, firebaseSent: false, errorMsg: message };
     }
   }, []);
 
-  const verifyOtp = useCallback((code) => code.length === 4, []);
-
-  const updatePin = useCallback((newPin) => {
-    setUserPin(newPin);
-    return true;
-  }, []);
+  // El OTP por correo queda pendiente; no aceptar códigos ficticios.
+  const verifyOtp = useCallback(() => false, []);
 
   const toggleBalanceVisibility = useCallback(() => {
     setShowBalance((prev) => !prev);
@@ -137,8 +197,10 @@ export const AuthProvider = ({ children }) => {
   const contextValue = useMemo(
     () => ({
       currentScreen,
+      user, loading, login, register, logout, profileNotice,
+      resetPassword: requestPasswordReset,
       setCurrentScreen,
-      userPin,
+      ...pinLock,
       userEmail,
       setUserEmail,
       showBalance,
@@ -149,14 +211,14 @@ export const AuthProvider = ({ children }) => {
       setTransactions,
       requestPasswordReset,
       verifyOtp,
-      updatePin,
       recoveryError,
       recoverySuccess,
       isStorageReady,
     }),
     [
       currentScreen,
-      userPin,
+      user, loading, login, register, logout, profileNotice,
+      pinLock,
       userEmail,
       showBalance,
       toggleBalanceVisibility,
@@ -165,7 +227,6 @@ export const AuthProvider = ({ children }) => {
       transactions,
       requestPasswordReset,
       verifyOtp,
-      updatePin,
       recoveryError,
       recoverySuccess,
       isStorageReady,

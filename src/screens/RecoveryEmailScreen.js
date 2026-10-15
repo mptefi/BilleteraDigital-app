@@ -4,18 +4,19 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   TextInput,
   Image,
   ActivityIndicator,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
 import AppModal from "../components/AppModal";
+import { isValidEmail } from "../services/authErrors";
 
 export default function RecoveryEmailScreen() {
-  const { setCurrentScreen, requestPasswordReset } = useAuth();
+  const { setCurrentScreen, resetPassword, user } = useAuth();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [modalConfig, setModalConfig] = useState(null);
@@ -23,7 +24,8 @@ export default function RecoveryEmailScreen() {
   const closeModal = () => setModalConfig(null);
 
   const handleSubmit = async () => {
-    if (!email.trim() || !email.includes("@")) {
+    if (loading) return;
+    if (!isValidEmail(email)) {
       setModalConfig({
         icon: "mail",
         title: "Correo requerido",
@@ -35,24 +37,23 @@ export default function RecoveryEmailScreen() {
 
     const cleanEmail = email.trim();
     setLoading(true);
-    const result = await requestPasswordReset(cleanEmail);
+    const result = await resetPassword(cleanEmail);
     setLoading(false);
 
-    if (result.firebaseSent) {
+    if (result.success) {
       setModalConfig({
         icon: "check-circle",
-        title: "Correo enviado por Firebase",
-        message: `Se envio un correo oficial de restablecimiento a ${cleanEmail}. Revisa tu bandeja de entrada o SPAM.`,
-        primaryLabel: "Continuar",
-        onPrimary: () => setCurrentScreen("RECOVERY_CODE"),
+        title: "Revisa tu correo",
+        message: `Si ${cleanEmail} tiene una cuenta, recibirás un enlace para restablecer tu contraseña. Revisa también SPAM. El enlace permite cambiar la contraseña de tu cuenta; no contiene un código de cuatro dígitos.`,
+        primaryLabel: user ? "Volver al perfil" : "Volver al inicio de sesión",
+        onPrimary: () => setCurrentScreen(user ? "PROFILE" : "LOGIN"),
       });
     } else {
       setModalConfig({
-        icon: "send",
-        title: "Codigo enviado",
-        message: `Se genero tu codigo de verificacion para ${cleanEmail}.`,
-        primaryLabel: "Continuar al paso 2",
-        onPrimary: () => setCurrentScreen("RECOVERY_CODE"),
+        icon: "alert-triangle",
+        title: "No se pudo enviar el enlace",
+        message: result.errorMsg,
+        primaryLabel: "Intentar de nuevo",
       });
     }
   };
@@ -69,7 +70,7 @@ export default function RecoveryEmailScreen() {
 
       <TouchableOpacity
         style={styles.backButton}
-        onPress={() => setCurrentScreen("LOGIN")}
+        onPress={() => setCurrentScreen(user ? "PROFILE" : "LOGIN")}
         activeOpacity={0.7}
       >
         <Image
@@ -94,7 +95,7 @@ export default function RecoveryEmailScreen() {
         </View>
 
         <Text style={styles.headingText}>
-          Descuida, te ayudaremos a cambiar tu clave de Al Toque.
+          Te enviaremos un enlace para restablecer tu contraseña de Al Toque.
         </Text>
 
         <View style={styles.fieldGroup}>
@@ -126,7 +127,7 @@ export default function RecoveryEmailScreen() {
           {loading ? (
             <ActivityIndicator color={COLORS.white} />
           ) : (
-            <Text style={styles.submitBtnText}>Enviar codigo de verificacion</Text>
+            <Text style={styles.submitBtnText}>Enviar enlace de recuperación</Text>
           )}
         </TouchableOpacity>
       </View>

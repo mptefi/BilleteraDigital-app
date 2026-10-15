@@ -8,10 +8,8 @@ import {
   StatusBar,
 } from "react-native";
 import { COLORS } from "../theme/colors";
-import { useAuth } from "../context/AuthContext";
 
 export default function SplashScreen() {
-  const { setCurrentScreen } = useAuth();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.85)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -49,19 +47,9 @@ export default function SplashScreen() {
     );
     pulseAnimation.start();
 
-    // Transición fluida a la pantalla de Login después de 2.8 segundos
-    const timer = setTimeout(() => {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }).start(() => {
-        setCurrentScreen("LOGIN");
-      });
-    }, 2800);
+    // El navegador espera el estado de Firebase y la lectura del almacenamiento.
 
     return () => {
-      clearTimeout(timer);
       pulseAnimation.stop();
     };
   }, []);

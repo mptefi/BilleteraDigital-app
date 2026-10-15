@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   TextInput,
   Image,
   Linking,
   FlatList,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { COLORS } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
@@ -45,7 +45,7 @@ const faqs = [
 ];
 
 export default function SupportScreen() {
-  const { setCurrentScreen } = useAuth();
+  const { setCurrentScreen, user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const searchInputRef = useRef(null);
@@ -214,7 +214,7 @@ export default function SupportScreen() {
 
       <TouchableOpacity
         style={styles.backButton}
-        onPress={() => setCurrentScreen("LOGIN")}
+        onPress={() => setCurrentScreen(user ? "HOME" : "LOGIN")}
         activeOpacity={0.7}
       >
         <Image
