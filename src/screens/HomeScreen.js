@@ -10,6 +10,8 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
+  BackHandler,
+  Switch,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -29,6 +31,9 @@ import TransactionRow from "../components/TransactionRow";
 import EmptyState from "../components/EmptyState";
 import RetryState from "../components/RetryState";
 import AppModal from "../components/AppModal";
+import { FeatureStatus } from "../components/FeatureScreen";
+import useShakeHistory from "../hooks/useShakeHistory";
+import { demoMovement } from "../services/demoReceipt";
 
 const filterOptions = [
   { id: "all", label: "Todos" },
@@ -39,6 +44,8 @@ const filterOptions = [
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const {
+    currentScreen,
+    user,
     setCurrentScreen,
     userName,
     balance,
@@ -46,6 +53,7 @@ export default function HomeScreen() {
     toggleBalanceVisibility,
     transactions,
   } = useAuth();
+  const isHistory = currentScreen === "HISTORY";
   const [activeTab, setActiveTab] = useState("inicio");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
@@ -54,6 +62,18 @@ export default function HomeScreen() {
   const [ratesError, setRatesError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [modalConfig, setModalConfig] = useState(null);
+  const openHistory = useCallback(() => setCurrentScreen("HISTORY"), [setCurrentScreen]);
+  const shake = useShakeHistory(user.uid, !isHistory && activeTab === "inicio" && !modalConfig, openHistory);
+
+  useEffect(() => {
+    if (!isHistory) return;
+    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+      setActiveTab("inicio");
+      setCurrentScreen("HOME");
+      return true;
+    });
+    return () => back.remove();
+  }, [isHistory, setCurrentScreen]);
 
   const showInfoModal = useCallback((config) => {
     setModalConfig(config);
@@ -79,6 +99,7 @@ export default function HomeScreen() {
         normalizedQuery.length === 0 ||
         item.title.toLowerCase().includes(normalizedQuery) ||
         item.date.toLowerCase().includes(normalizedQuery) ||
+        (item.simulation && "simulado".includes(normalizedQuery)) ||
         item.amount.toLowerCase().includes(normalizedQuery);
 
       return matchesFilter && matchesSearch;
@@ -165,6 +186,8 @@ export default function HomeScreen() {
   const ListHeader = useMemo(
     () => (
       <View>
+        {!isHistory && (
+          <>
         <View style={styles.topHeader}>
           <View style={styles.userInfo}>
             <View style={styles.avatarWrapper}>
@@ -194,17 +217,13 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               style={styles.iconBadgeBtn}
-              onPress={() =>
-                showInfoModal({
-                  icon: "bell",
-                  title: "Notificaciones",
-                  message: "No tienes notificaciones pendientes.",
-                })
-              }
+              accessibilityRole="button"
+              accessibilityLabel="Notificaciones"
+              hitSlop={4}
+              onPress={() => setCurrentScreen("REMINDERS")}
               activeOpacity={0.7}
             >
               <Feather name="bell" size={20} color={COLORS.textPrimary} />
-              <View style={styles.redDot} />
             </TouchableOpacity>
           </View>
         </View>
@@ -215,7 +234,7 @@ export default function HomeScreen() {
               style={styles.saldoToggleRow}
               onPress={toggleBalanceVisibility}
             >
-              <Text style={styles.saldoLabel}>Saldo disponible</Text>
+              <Text style={styles.saldoLabel}>Saldo simulado</Text>
               <Feather
                 name={showBalance ? "eye" : "eye-off"}
                 size={18}
@@ -360,19 +379,54 @@ export default function HomeScreen() {
             Mostrando ultimo dato guardado. Desliza para reintentar.
           </Text>
         ) : null}
+          </>
+        )}
 
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionTitle}>Ultimos movimientos</Text>
+            <Text accessibilityRole="header" style={[styles.sectionTitle, isHistory && styles.historyTitle]}>{isHistory ? "Historial de movimientos" : "Últimos movimientos"}</Text>
             <Text style={styles.sectionSubtitle}>
               {transactions.length} total · {totals.income} ingresos ·{" "}
               {totals.expense} gastos
             </Text>
           </View>
-          <TouchableOpacity onPress={() => setActiveTab("movimientos")}>
+          {!isHistory && <TouchableOpacity accessibilityRole="button" onPress={openHistory}>
             <Text style={styles.verTodoText}>Ver todo</Text>
-          </TouchableOpacity>
+          </TouchableOpacity>}
         </View>
+
+        {isHistory && (
+          <View style={styles.historySettings}>
+            <View style={styles.historyAction}>
+              <View style={styles.historyIcon}><Feather name="smartphone" size={20} color="#854000" /></View>
+              <Text style={styles.historyActionTitle}>Agitar para ver mis movimientos</Text>
+              <Switch
+                accessibilityLabel="Agitar para ver mis movimientos"
+                value={shake.enabled}
+                disabled={!shake.loaded || shake.available !== true}
+                thumbColor={COLORS.white}
+                trackColor={{ false: COLORS.textMuted, true: COLORS.primaryDark }}
+                onValueChange={shake.change}
+              />
+            </View>
+            {shake.available === false && <FeatureStatus icon="smartphone" message="El acelerómetro no está disponible en este dispositivo." />}
+            {!!shake.notice && <FeatureStatus icon="info" message={shake.notice} />}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`${demoMovement.title} · ${demoMovement.amount} · Comprobante`}
+              style={styles.historyAction}
+              onPress={() => setCurrentScreen("RECEIPT")}
+              activeOpacity={0.75}
+            >
+              <View style={styles.historyIcon}><Feather name="file-text" size={20} color="#854000" /></View>
+              <View style={styles.historyActionCopy}>
+                <Text style={styles.historyActionTitle}>Comprobante de prueba</Text>
+                <Text style={styles.historyActionDetail}>{demoMovement.title} · {demoMovement.amount}</Text>
+              </View>
+              <Feather name="chevron-right" size={19} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={styles.searchBar}>
           <Feather
@@ -401,6 +455,8 @@ export default function HomeScreen() {
             return (
               <TouchableOpacity
                 key={option.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
                 style={[styles.filterChip, isActive && styles.filterChipActive]}
                 onPress={() => setSelectedFilter(option.id)}
                 activeOpacity={0.8}
@@ -431,6 +487,13 @@ export default function HomeScreen() {
     ),
     [
       userName,
+      isHistory,
+      openHistory,
+      shake.enabled,
+      shake.available,
+      shake.loaded,
+      shake.change,
+      shake.notice,
       setCurrentScreen,
       showInfoModal,
       toggleBalanceVisibility,
@@ -452,9 +515,10 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+      <StatusBar barStyle="dark-content" />
 
       <FlatList
+        key={isHistory ? "historial" : "inicio"}
         data={filteredTransactions}
         keyExtractor={keyExtractor}
         renderItem={renderTransaction}
@@ -483,17 +547,20 @@ export default function HomeScreen() {
       <View style={[styles.tabBarContainer, { height: 75 + insets.bottom, paddingBottom: insets.bottom }]}>
         <TouchableOpacity
           style={styles.tabItem}
-          onPress={() => setActiveTab("inicio")}
+          accessibilityRole="button"
+          accessibilityLabel="Inicio"
+          accessibilityState={{ selected: !isHistory && activeTab === "inicio" }}
+          onPress={() => { setActiveTab("inicio"); setCurrentScreen("HOME"); }}
         >
           <Feather
             name="home"
             size={24}
-            color={activeTab === "inicio" ? COLORS.primary : COLORS.textMuted}
+            color={!isHistory && activeTab === "inicio" ? COLORS.primary : COLORS.textMuted}
           />
           <Text
             style={[
               styles.tabLabel,
-              activeTab === "inicio" && styles.tabLabelActive,
+              !isHistory && activeTab === "inicio" && styles.tabLabelActive,
             ]}
           >
             Inicio
@@ -502,19 +569,22 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.tabItem}
-          onPress={() => setActiveTab("movimientos")}
+          accessibilityRole="button"
+          accessibilityLabel="Movimientos"
+          accessibilityState={{ selected: isHistory }}
+          onPress={openHistory}
         >
           <Feather
             name="list"
             size={24}
             color={
-              activeTab === "movimientos" ? COLORS.primary : COLORS.textMuted
+              isHistory ? COLORS.primary : COLORS.textMuted
             }
           />
           <Text
             style={[
               styles.tabLabel,
-              activeTab === "movimientos" && styles.tabLabelActive,
+              isHistory && styles.tabLabelActive,
             ]}
           >
             Movimientos
@@ -523,13 +593,9 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.qrButtonFab}
-          onPress={() =>
-            showInfoModal({
-              icon: "camera",
-              title: "Escaner QR Al Toque",
-              message: "Escanea un codigo QR para pagar o cobrar al instante.",
-            })
-          }
+          accessibilityRole="button"
+          accessibilityLabel="Escanear código QR"
+          onPress={() => setCurrentScreen("QR")}
           activeOpacity={0.85}
         >
           <MaterialCommunityIcons
@@ -542,17 +608,17 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.tabItem}
-          onPress={() => setActiveTab("tarjetas")}
+          onPress={() => { setActiveTab("tarjetas"); setCurrentScreen("HOME"); }}
         >
           <Feather
             name="credit-card"
             size={24}
-            color={activeTab === "tarjetas" ? COLORS.primary : COLORS.textMuted}
+            color={!isHistory && activeTab === "tarjetas" ? COLORS.primary : COLORS.textMuted}
           />
           <Text
             style={[
               styles.tabLabel,
-              activeTab === "tarjetas" && styles.tabLabelActive,
+              !isHistory && activeTab === "tarjetas" && styles.tabLabelActive,
             ]}
           >
             Tarjetas
@@ -582,6 +648,16 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  historySettings: { gap: 10, marginBottom: 16 },
+  historyTitle: { fontSize: 24, letterSpacing: -0.5 },
+  historyAction: {
+    flexDirection: "row", alignItems: "center", gap: 10, padding: 12,
+    backgroundColor: COLORS.white, borderWidth: 1, borderColor: COLORS.border, borderRadius: 18,
+  },
+  historyIcon: { width: 42, height: 42, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0DF" },
+  historyActionCopy: { flex: 1, gap: 4 },
+  historyActionTitle: { flexShrink: 1, flexGrow: 1, fontSize: 14, fontWeight: "700", color: COLORS.textPrimary },
+  historyActionDetail: { fontSize: 13, lineHeight: 18, color: COLORS.textSecondary },
   container: {
     flex: 1,
     backgroundColor: "#FBFBFB",
@@ -658,15 +734,6 @@ const styles = StyleSheet.create({
   headerIconImg: {
     width: 22,
     height: 22,
-  },
-  redDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#FF3B30",
-    position: "absolute",
-    top: 8,
-    right: 8,
   },
   balanceCard: {
     backgroundColor: COLORS.primary,
@@ -902,6 +969,7 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     marginBottom: 12,
   },
@@ -923,7 +991,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   filterChipTextActive: {
-    color: COLORS.white,
+    color: COLORS.textPrimary,
   },
   transactionsCard: {
     backgroundColor: COLORS.white,
@@ -969,6 +1037,7 @@ const styles = StyleSheet.create({
   tabItem: {
     alignItems: "center",
     justifyContent: "center",
+    minHeight: 48,
     flex: 1,
   },
   tabLabel: {

@@ -11,6 +11,9 @@ import { sendPasswordResetEmail, onAuthStateChanged, signInWithEmailAndPassword,
   createUserWithEmailAndPassword, updateProfile, signOut } from "firebase/auth";
 import { authErrorMessage } from "../services/authErrors";
 import usePinLock from "./usePinLock";
+import { getSimulatedBalanceCents, loadSimulatedPayments, saveSimulatedPayment } from "../services/simulatedPayments";
+import { movementActivity } from "../services/notificationActivity";
+import { sendActivityNotification } from "../services/reminders";
 import {
   getStoredJson,
   setStoredJson,
@@ -64,13 +67,18 @@ export const AuthProvider = ({ children }) => {
   const [userEmail, setUserEmail] = useState("");
   const [showBalance, setShowBalance] = useState(true);
   const userName = profileName || user?.displayName || user?.email?.split("@")[0] || "Usuario";
-  const [balance] = useState(1840.5);
   const [recoveryError, setRecoveryError] = useState("");
   const [recoverySuccess, setRecoverySuccess] = useState("");
-  const [transactions, setTransactions] = useState(initialTransactions);
+  const [baseTransactions, setTransactions] = useState(initialTransactions);
+  const [simulationHistory, setSimulationHistory] = useState(null);
+  const accountSimulations = simulationHistory?.uid === user?.uid ? simulationHistory?.payments : undefined;
+  const transactions = useMemo(() => accountSimulations?.length
+    ? [...accountSimulations, ...baseTransactions]
+    : baseTransactions, [baseTransactions, accountSimulations]);
+  const balance = useMemo(() => getSimulatedBalanceCents(accountSimulations ?? []) / 100, [accountSimulations]);
   const [isStorageReady, setIsStorageReady] = useState(false);
   const pinLock = usePinLock(user);
-  const { lockSession, allowPinSetupAfterLogin } = pinLock;
+  const { lockSession, allowPinSetupAfterRegistration } = pinLock;
 
   useEffect(() => {
     return onAuthStateChanged(auth, (nextUser) => {
@@ -84,6 +92,7 @@ export const AuthProvider = ({ children }) => {
       setIsStorageReady(false);
       setShowBalance(true);
       setTransactions(initialTransactions);
+      setSimulationHistory(null);
       setCurrentScreen(nextUser ? "HOME" : "LOGIN");
       setLoading(false);
     }, () => {
@@ -100,10 +109,11 @@ export const AuthProvider = ({ children }) => {
     let active = true;
     if (!user?.uid) return;
     const hydrateStoredSession = async () => {
-      const [storedShowBalance, storedTransactions] =
+      const [storedShowBalance, storedTransactions, storedSimulations] =
         await Promise.all([
           getStoredJson(`${storageKeys.showBalance}/${user.uid}`, null),
           getStoredJson(`${storageKeys.transactions}/${user.uid}`, null),
+          loadSimulatedPayments(user.uid).catch(() => []),
         ]);
       if (!active) return;
 
@@ -114,6 +124,7 @@ export const AuthProvider = ({ children }) => {
       if (Array.isArray(storedTransactions)) {
         setTransactions(storedTransactions);
       }
+      setSimulationHistory({ uid: user.uid, payments: storedSimulations });
 
       setIsStorageReady(true);
     };
@@ -130,22 +141,36 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (isStorageReady && user) {
-      setStoredJson(`${storageKeys.transactions}/${user.uid}`, transactions);
+      setStoredJson(`${storageKeys.transactions}/${user.uid}`, baseTransactions);
     }
-  }, [isStorageReady, transactions, user?.uid]);
+  }, [isStorageReady, baseTransactions, user?.uid]);
+
+  const confirmQrPayment = useCallback(async (operationId, payment) => {
+    const uid = user?.uid;
+    if (!uid || auth.currentUser?.uid !== uid || pinLock.pinState.status !== "unlocked" ||
+        pinLock.pinState.uid !== uid || !pinLock.isAppActive || payment.uid !== uid || !payment.simulation) {
+      throw new Error("Desbloquea la sesión y vuelve a escanear el QR.");
+    }
+
+    const { receipt, payments, created } = await saveSimulatedPayment(uid, operationId, payment);
+    if (auth.currentUser?.uid === uid) {
+      setSimulationHistory({ uid, payments });
+      if (created) sendActivityNotification(uid, movementActivity(receipt)).catch(() => {});
+    }
+    return receipt;
+  }, [pinLock, user?.uid]);
 
   const login = useCallback(async (email, password) => {
     try {
-      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
-      allowPinSetupAfterLogin(result.user.uid);
+      await signInWithEmailAndPassword(auth, email.trim(), password);
     } catch (error) { throw new Error(authErrorMessage(error)); }
-  }, [allowPinSetupAfterLogin]);
+  }, []);
 
   const register = useCallback(async (name, email, password) => {
     let result;
     try {
       result = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      allowPinSetupAfterLogin(result.user.uid);
+      allowPinSetupAfterRegistration(result.user.uid);
     } catch (error) { throw new Error(authErrorMessage(error)); }
     try {
       await updateProfile(result.user, { displayName: name.trim() });
@@ -155,7 +180,7 @@ export const AuthProvider = ({ children }) => {
         setProfileNotice("Tu cuenta se creó, pero no pudimos guardar tu nombre. Por ahora mostraremos tu correo.");
       }
     }
-  }, [allowPinSetupAfterLogin]);
+  }, [allowPinSetupAfterRegistration]);
 
   const logout = useCallback(async () => {
     lockSession();
@@ -167,6 +192,7 @@ export const AuthProvider = ({ children }) => {
       setUserEmail("");
       setShowBalance(true);
       setTransactions(initialTransactions);
+      setSimulationHistory(null);
       setIsStorageReady(false);
       setCurrentScreen("LOGIN");
     } catch (error) { throw new Error(authErrorMessage(error)); }
@@ -209,6 +235,7 @@ export const AuthProvider = ({ children }) => {
       balance,
       transactions,
       setTransactions,
+      confirmQrPayment,
       requestPasswordReset,
       verifyOtp,
       recoveryError,
@@ -225,6 +252,7 @@ export const AuthProvider = ({ children }) => {
       userName,
       balance,
       transactions,
+      confirmQrPayment,
       requestPasswordReset,
       verifyOtp,
       recoveryError,

@@ -3,11 +3,18 @@ import {
   Modal,
   View,
   Text,
-  TouchableOpacity,
+  ScrollView,
   StyleSheet,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { COLORS } from "../theme/colors";
+import { FeatureButton } from "./FeatureScreen";
+
+const iconTones = {
+  alert: { background: "#FCEEEF", color: "#922D3A" },
+  success: { background: "#E9F5EF", color: "#12604A" },
+  default: { background: "#FFE6CE", color: "#854000" },
+};
 
 export default function AppModal({
   visible,
@@ -19,7 +26,10 @@ export default function AppModal({
   secondaryLabel,
   onSecondary,
   onClose,
+  children,
+  iconTone,
 }) {
+  const tone = iconTone || iconTones[icon.startsWith("alert") ? "alert" : icon.startsWith("check") ? "success" : "default"];
   const handleClose = () => {
     if (onClose) {
       onClose();
@@ -39,31 +49,19 @@ export default function AppModal({
       onRequestClose={handleClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.modal}>
-          <View style={styles.iconCircle}>
-            <Feather name={icon} size={28} color={COLORS.primary} />
-          </View>
-
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
-
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={onPrimary}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.primaryText}>{primaryLabel}</Text>
-          </TouchableOpacity>
-
-          {secondaryLabel ? (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={onSecondary}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.secondaryText}>{secondaryLabel}</Text>
-            </TouchableOpacity>
-          ) : null}
+        <View style={styles.modal} accessibilityViewIsModal>
+          <ScrollView bounces={false} contentContainerStyle={styles.modalContent}>
+            <View style={[styles.iconCircle, { backgroundColor: tone.background }]}>
+              <Feather name={icon} size={28} color={tone.color} />
+            </View>
+            <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+            {!!message && <Text style={styles.message}>{message}</Text>}
+            {children}
+            <View style={styles.actions}>
+              <FeatureButton label={primaryLabel} onPress={onPrimary} />
+              {!!secondaryLabel && <FeatureButton secondary label={secondaryLabel} onPress={onSecondary || handleClose} />}
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -73,70 +71,47 @@ export default function AppModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    backgroundColor: "rgba(28, 21, 16, 0.62)",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+    padding: 20,
   },
   modal: {
     width: "100%",
-    maxWidth: 340,
+    maxWidth: 380,
+    maxHeight: "94%",
     backgroundColor: COLORS.white,
-    borderRadius: 22,
-    paddingHorizontal: 22,
-    paddingVertical: 24,
+    borderRadius: 28,
+    overflow: "hidden",
+  },
+  modalContent: {
+    padding: 22,
     alignItems: "center",
+    gap: 10,
   },
   iconCircle: {
     width: 58,
     height: 58,
-    borderRadius: 29,
-    backgroundColor: COLORS.primaryLight,
+    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: 4,
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: "bold",
     color: COLORS.textPrimary,
     textAlign: "center",
-    marginBottom: 8,
   },
   message: {
-    fontSize: 14,
+    fontSize: 15,
     color: COLORS.textSecondary,
     textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 18,
+    lineHeight: 22,
   },
-  primaryButton: {
+  actions: {
     width: "100%",
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: COLORS.primary,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  primaryText: {
-    fontSize: 15,
-    fontWeight: "bold",
-    color: COLORS.white,
-  },
-  secondaryButton: {
-    width: "100%",
-    height: 46,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: COLORS.white,
+    gap: 8,
     marginTop: 10,
-  },
-  secondaryText: {
-    fontSize: 15,
-    fontWeight: "bold",
-    color: COLORS.primary,
   },
 });

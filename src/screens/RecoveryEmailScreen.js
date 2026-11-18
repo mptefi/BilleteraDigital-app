@@ -66,7 +66,7 @@ export default function RecoveryEmailScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+      <StatusBar barStyle="dark-content" />
 
       <TouchableOpacity
         style={styles.backButton}

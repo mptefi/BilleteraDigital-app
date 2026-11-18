@@ -6,12 +6,13 @@ Se mantiene Firebase Authentication para identificar la cuenta y se agrega una b
 
 | Situación | Pantallas |
 | --- | --- |
-| Primer registro o login en un dispositivo sin PIN | Splash → Registro/Login → Crear y confirmar PIN → Carga de inicialización → Ingresar PIN → Home. |
+| Primer registro desde la app | Registro → Crear y confirmar PIN → Carga de inicialización → Teclado PIN → Home. |
+| Inicio de sesión con PIN guardado en el dispositivo | Login → Teclado PIN → Home al acertar. |
+| Inicio de sesión o sesión restaurada en un dispositivo sin PIN | Teclado PIN → Configurar PIN → Verificar contraseña → Crear y confirmar PIN → Teclado PIN. |
 | Sesión ya iniciada y PIN configurado | Splash → Teclado PIN → Home. |
 | Volver del segundo plano | Se oculta el contenido privado → Teclado PIN → Home al acertar. |
 | Tres intentos fallidos | Teclado bloqueado → Verificar contraseña de la cuenta → Crear y confirmar PIN nuevo → Carga → Ingresar PIN. |
 | Olvidar PIN o cambiarlo desde Perfil | Verificar contraseña de la cuenta → Crear y confirmar PIN nuevo → Carga → Ingresar PIN. |
-| Sesión restaurada que todavía no tiene PIN | Verificar contraseña de la cuenta → Crear y confirmar PIN. |
 | Salir y volver al PIN | Teclado PIN; la sesión de Firebase y la cuenta vinculada se conservan. |
 | Cambiar de cuenta | Cierra la sesión de Firebase y muestra Login con correo y contraseña; se conserva el verificador local asociado a cada cuenta. |
 
@@ -57,7 +58,7 @@ El acceso biométrico simulado anterior fue reemplazado por una opción para cer
 ## Cómo probarlo en tu celular
 
 1. Reinicia Metro con npm start -- --clear. En Expo Go usa una versión compatible con SDK 57. Si utilizas un development build propio anterior, recompílalo para incorporar los módulos nativos nuevos.
-2. Inicia sesión o crea una cuenta. Si ya había una sesión restaurada sin PIN, escribe la contraseña una vez para autorizar la configuración inicial.
+2. Crea una cuenta desde la app o entra con una cuenta existente. Si la cuenta todavía no tiene un PIN en el dispositivo, elige **Configurar PIN** en el teclado y verifica la contraseña.
 3. Introduce un PIN nuevo de seis dígitos y repítelo. Si no coincide, la app debe mostrar el error y permanecer en esa pantalla.
 4. Pulsa Guardar PIN y continuar. Debe aparecer la pantalla de carga y luego el teclado PIN. Introduce el PIN recién creado para abrir Home.
 5. Cierra completamente la app y ábrela: después de Splash debe aparecer el teclado naranja. Escribe el PIN configurado para entrar.

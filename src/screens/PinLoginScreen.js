@@ -22,7 +22,8 @@ export default function PinLoginScreen() {
   const busyRef = useRef(false);
   const [modalConfig, setModalConfig] = useState(null);
   const isAccountLocked = pinState.status === "blocked";
-  const disabled = busy || isAccountLocked || pinState.status === "error";
+  const needsLocalPin = pinState.status === "missing";
+  const disabled = busy || pinState.status !== "locked";
   // Estado para los 10 dígitos del teclado de seguridad (Inicializado fiel a Figma)
   const [keypadNumbers, setKeypadNumbers] = useState([
     "0", "3", "6",
@@ -62,7 +63,9 @@ export default function PinLoginScreen() {
     busyRef.current = true; setBusy(true);
     try {
       const result = await unlockWithPin(nextPin);
-      if (result.success) setCurrentScreen("HOME");
+      if (result.success) {
+        setCurrentScreen((screen) => ["QR", "RECEIPT", "REMINDERS", "HISTORY"].includes(screen) ? screen : "HOME");
+      }
       else if (!result.interrupted) setModalConfig({
         title: result.remainingAttempts === 0 ? "Acceso por PIN bloqueado" : "PIN incorrecto",
         message: result.remainingAttempts === 0
@@ -110,7 +113,7 @@ export default function PinLoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+      <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" bounces={false}>
       <View style={styles.topContainer}>
         {/* Logo Al Toque (Fiel a Figma) */}
@@ -133,6 +136,8 @@ export default function PinLoginScreen() {
             style={styles.actionItemWrapper}
             onPress={handleRecoverFromLock}
             disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel={needsLocalPin ? "Configurar PIN" : "¿Olvidaste tu PIN?"}
             activeOpacity={0.7}
           >
             <View style={styles.actionSquareBox}>
@@ -142,7 +147,7 @@ export default function PinLoginScreen() {
                 resizeMode="contain"
               />
             </View>
-            <Text style={styles.actionItemText}>¿Olvidaste tu{"\n"}PIN?</Text>
+            <Text style={styles.actionItemText}>{needsLocalPin ? "Configurar\nPIN" : "¿Olvidaste tu\nPIN?"}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -175,6 +180,7 @@ export default function PinLoginScreen() {
           ))}
         </View>
 
+        {needsLocalPin && <Text style={styles.statusText}>Configura un PIN en este dispositivo para desbloquear la app.</Text>}
         {isAccountLocked && <Text style={styles.statusText}>PIN bloqueado. Verifica tu contraseña para recuperarlo.</Text>}
         {pinState.status === "error" && <TouchableOpacity onPress={reloadPin}><Text style={styles.statusText}>No pudimos leer tu PIN. Toca para reintentar.</Text></TouchableOpacity>}
         {busy && <ActivityIndicator color={COLORS.primary} />}
@@ -209,7 +215,7 @@ export default function PinLoginScreen() {
                       key={colIndex}
                       style={styles.keypadColContainer}
                       onPress={handleDelete}
-                      disabled={busy}
+                      disabled={disabled}
                       accessibilityLabel="Borrar dígito"
                       activeOpacity={0.7}
                     >

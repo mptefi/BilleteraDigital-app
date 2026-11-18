@@ -1,0 +1,11 @@
+{
+  "functions": { "source": "functions" },
+  "emulators": {
+    "functions": { "host": "127.0.0.1", "port": 5011 },
+    "hub": { "host": "127.0.0.1", "port": 4411 },
+    "logging": { "host": "127.0.0.1", "port": 4511 },
+    "eventarc": { "host": "127.0.0.1", "port": 9311 },
+    "tasks": { "host": "127.0.0.1", "port": 9511 },
+    "ui": { "enabled": false }
+  }
+}

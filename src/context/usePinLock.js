@@ -63,8 +63,8 @@ export default function usePinLock(user) {
     return () => { readSequence.current += 1; };
   }, [uid, reloadPin]);
 
-  // Solo un acceso reciente al servidor puede autorizar la creación inicial del PIN.
-  const allowPinSetupAfterLogin = useCallback((id) => {
+  // El registro recién completado puede iniciar la creación del PIN.
+  const allowPinSetupAfterRegistration = useCallback((id) => {
     if (auth.currentUser?.uid !== id || AppState.currentState === "background" || AppState.currentState === "inactive") return;
     authorization.current = { uid: id, epoch: epoch.current };
     setPinState((previous) => previous.uid === id && previous.status === "missing" ? { ...previous, status: "setup" } : previous);
@@ -131,6 +131,6 @@ export default function usePinLock(user) {
     } finally { operation.current = false; }
   }, [validSession]);
 
-  return useMemo(() => ({ pinState, isAppActive, lockSession, reloadPin, allowPinSetupAfterLogin, unlockWithPin, authorizePinReset, setupPin }),
-    [pinState, isAppActive, lockSession, reloadPin, allowPinSetupAfterLogin, unlockWithPin, authorizePinReset, setupPin]);
+  return useMemo(() => ({ pinState, isAppActive, lockSession, reloadPin, allowPinSetupAfterRegistration, unlockWithPin, authorizePinReset, setupPin }),
+    [pinState, isAppActive, lockSession, reloadPin, allowPinSetupAfterRegistration, unlockWithPin, authorizePinReset, setupPin]);
 }

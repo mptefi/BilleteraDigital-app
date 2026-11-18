@@ -6,18 +6,26 @@
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "axios": "^1.20.0",
-    "expo": "~57.0.21",
-    "expo-crypto": "~57.0.4",
-    "expo-font": "~57.0.3",
-    "expo-secure-store": "~57.0.4",
-    "expo-status-bar": "~57.0.1",
+    "expo": "~58.0.26",
+    "expo-camera": "~58.0.14",
+    "expo-constants": "~58.0.16",
+    "expo-crypto": "~58.0.8",
+    "expo-dev-client": "~58.0.21",
+    "expo-device": "~58.0.5",
+    "expo-file-system": "~58.0.14",
+    "expo-font": "~58.0.12",
+    "expo-notifications": "~58.1.9",
+    "expo-secure-store": "~58.0.3",
+    "expo-sensors": "~58.0.5",
+    "expo-status-bar": "~58.0.5",
     "firebase": "^12.19.0",
-    "react": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-safe-area-context": "~5.7.0"
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.11.1"
   },
   "scripts": {
-    "test": "node tests/auth.test.cjs",
+    "test": "node --test --test-isolation=none tests/auth.test.cjs tests/apf3.test.cjs",
+    "test:emulators": "node tests/firebase-emulators.cjs",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -25,6 +33,6 @@
   },
   "private": true,
   "devDependencies": {
-    "react-test-renderer": "^19.2.3"
+    "react-test-renderer": "19.3.0"
   }
 }

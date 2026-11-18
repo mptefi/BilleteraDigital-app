@@ -1,27 +1,10 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
-const babel = require("@babel/core");
+const load = require("./load-module.cjs");
 const React = require("react");
 const crypto = require("node:crypto");
 const { create, act } = require("react-test-renderer");
 global.IS_REACT_ACT_ENVIRONMENT = true;
-
-function load(relativePath, mocks = {}, globals = {}) {
-  const filename = path.resolve(__dirname, "..", relativePath);
-  const { code } = babel.transformSync(fs.readFileSync(filename, "utf8"), {
-    filename, babelrc: false, configFile: false,
-    plugins: ["@babel/plugin-transform-react-jsx", "@babel/plugin-transform-modules-commonjs"],
-  });
-  const module = { exports: {} };
-  vm.runInNewContext(code, {
-    module, exports: module.exports, console, process, setTimeout, clearTimeout, ...globals,
-    require: (id) => Object.hasOwn(mocks, id) ? mocks[id] : require(id),
-  }, { filename });
-  return module.exports;
-}
 
 const errors = load("src/services/authErrors.js");
 const userA = { uid: "A", email: "ana@example.com", displayName: "Ana" };
@@ -29,7 +12,7 @@ const userB = { uid: "B", email: "bea@example.com", displayName: "Bea" };
 
 async function harness(initialUser = null, saved = new Map(), secureSaved = new Map()) {
   const auth = { currentUser: initialUser };
-  const calls = { writes: [], login: [], register: [] };
+  const calls = { writes: [], login: [], register: [], notices: [] };
   let observer;
   let failure;
   let appStateListener;
@@ -64,9 +47,9 @@ async function harness(initialUser = null, saved = new Map(), secureSaved = new 
     },
   };
   const storage = {
-    storageKeys: { userPin: "pin", showBalance: "balance", transactions: "transactions" },
+    storageKeys: { userPin: "pin", showBalance: "balance", transactions: "transactions", simulatedPayments: "simulations" },
     getStoredJson: async (key, fallback) => saved.has(key) ? saved.get(key) : fallback,
-    setStoredJson: async (key, value) => { calls.writes.push([key, value]); saved.set(key, value); },
+    setStoredJson: async (key, value) => { calls.writes.push([key, value]); saved.set(key, value); return true; },
     removeStoredValue: async (key) => { saved.delete(key); },
   };
   const vault = load("src/services/pinVault.js", {
@@ -98,14 +81,17 @@ async function harness(initialUser = null, saved = new Map(), secureSaved = new 
   const context = load("src/context/AuthContext.js", {
     "../config/firebase": { auth }, "firebase/auth": sdk,
     "../services/authErrors": errors, "../services/storage": storage,
+    "../services/simulatedPayments": load("src/services/simulatedPayments.js", { "./storage": storage }),
+    "../services/notificationActivity": load("src/services/notificationActivity.js"),
+    "../services/reminders": { sendActivityNotification: async (uid, activity) => { calls.notices.push([uid, activity]); } },
     "./usePinLock": pinLock,
   });
-  const screenNames = ["Splash", "Login", "RecoveryEmail", "RecoveryCode", "NewPassword", "Support", "Home", "Register", "Profile", "PinLogin", "PinRecovery"];
+  const screenNames = ["Splash", "Login", "RecoveryEmail", "RecoveryCode", "NewPassword", "Support", "Home", "Register", "Profile", "PinLogin", "PinRecovery", "Qr", "Receipt", "Reminders"];
   const screenMocks = Object.fromEntries(screenNames.map((name) => [
     `../screens/${name}Screen`, () => React.createElement(name),
   ]));
   const { default: Navigator } = load("src/navigation/AppNavigator.js", {
-    ...screenMocks, "../context/AuthContext": context,
+    ...screenMocks, "../context/AuthContext": context, "../hooks/useReminderNavigation": () => {},
     "react-native": { View: "View", StyleSheet: { create: (styles) => styles } },
   });
   let value;
@@ -145,7 +131,7 @@ test("restaura usuario observado y sus preferencias antes de mostrar Home", asyn
   const h = await harness(userA, new Map([["balance/A", false], ["transactions/A", []]]));
   try {
     await h.emit(userA);
-    assert.equal(h.screen(), "PinRecovery");
+    assert.equal(h.screen(), "PinLogin");
     assert.equal(h.value.userName, "Ana");
     assert.equal(h.value.showBalance, false);
     assert.equal(h.value.transactions.length, 0);
@@ -158,9 +144,94 @@ test("login usa el SDK y no guarda la contraseña en almacenamiento propio", asy
   try {
     await h.emit(null);
     await act(async () => h.value.login(" ana@example.com ", "secret-test"));
-    assert.equal(h.screen(), "NewPassword");
+    assert.equal(h.screen(), "PinLogin");
+    await assert.rejects(h.value.setupPin("123456"), /Verifica tu contraseña/);
     assert.deepEqual(h.calls.login[0], ["ana@example.com", "secret-test"]);
     assert.ok(h.calls.writes.every(([key, value]) => key !== "pin" && value !== "secret-test"));
+  } finally { await h.close(); }
+});
+
+test("al volver a iniciar sesión muestra el teclado y conserva el PIN existente", async () => {
+  const h = await harness();
+  try {
+    await h.vault.savePin("A", "654321");
+    const original = [...h.secureSaved.values()][0];
+    await h.emit(null);
+    await act(async () => h.value.login("ana@example.com", "account-password"));
+    assert.equal(h.screen(), "PinLogin");
+    assert.equal(h.value.pinState.status, "locked");
+    await act(async () => h.value.unlockWithPin("654321"));
+    await act(async () => h.value.logout());
+    assert.equal(h.screen(), "Login");
+    await act(async () => h.value.login("ana@example.com", "account-password"));
+    assert.equal(h.screen(), "PinLogin");
+    assert.equal([...h.secureSaved.values()][0], original);
+    await act(async () => h.value.unlockWithPin("654321"));
+    assert.equal(h.screen(), "Home");
+  } finally { await h.close(); }
+});
+
+test("aplica cada pago o ingreso una sola vez y restaura su saldo e historial por cuenta", async () => {
+  const saved = new Map([
+    ["transactions/A", [{ id: "previous" }]],
+    ["simulations/A", [{ id: "legacy", amountCents: 1250, currency: "PEN", type: "expense", simulation: true }]],
+  ]);
+  const secure = new Map();
+  const payment = { uid: "A", simulation: true, recipient: "Cafetería Demo", amountCents: 1250, currency: "PEN" };
+  let h = await harness(null, saved, secure);
+  try {
+    await h.emit(null);
+    await act(async () => h.value.login("ana@example.com", "account-password"));
+    await act(async () => h.value.authorizePinReset("account-password"));
+    await act(async () => h.value.setupPin("654321"));
+    await h.finishPinInitialization();
+    await assert.rejects(h.value.confirmQrPayment("SIM-1", payment), /Desbloquea/);
+    await act(async () => h.value.unlockWithPin("654321"));
+    await assert.rejects(h.value.confirmQrPayment("SIM-1", { ...payment, uid: "B" }), /Desbloquea/);
+    assert.equal(h.value.balance, 1840.50);
+    await act(async () => {
+      const results = await Promise.all([
+        h.value.confirmQrPayment("SIM-1", payment),
+        h.value.confirmQrPayment("SIM-1", payment),
+      ]);
+      assert.equal(results[0].id, "SIM-1");
+      assert.equal(results[0].confirmedAt, results[1].confirmedAt);
+    });
+    assert.equal(h.calls.writes.filter(([key]) => key === "simulations/A").length, 1);
+    assert.equal(h.calls.notices.length, 1);
+    assert.equal(h.calls.notices[0][0], "A");
+    assert.equal(h.calls.notices[0][1].category, "payment");
+    assert.equal(h.value.balance, 1828.00);
+    assert.equal(h.value.transactions.length, 3);
+    assert.equal(h.value.transactions[0].amount, "- S/ 12.50");
+    assert.equal(h.value.transactions[0].simulation, true);
+    assert.equal(h.value.transactions[2].id, "previous");
+  } finally { await h.close(); }
+
+  h = await harness(userA, saved, secure);
+  try {
+    await h.emit(userA);
+    assert.equal(h.value.transactions[0].id, "SIM-1");
+    assert.equal(h.value.balance, 1828.00);
+    await act(async () => h.value.unlockWithPin("654321"));
+    await act(async () => {
+      const incoming = { ...payment, recipient: "María Demo", direction: "credit" };
+      const results = await Promise.all([
+        h.value.confirmQrPayment("SIM-2", incoming),
+        h.value.confirmQrPayment("SIM-2", incoming),
+      ]);
+      assert.equal(results[0].balanceAfterCents, 184050);
+      assert.equal(results[1].balanceAfterCents, 184050);
+    });
+    assert.equal(h.value.balance, 1840.50);
+    assert.equal(h.value.transactions[0].amount, "+ S/ 12.50");
+    assert.equal(h.value.transactions[0].type, "income");
+    assert.equal(h.calls.writes.filter(([key]) => key === "simulations/A").length, 1);
+    assert.equal(h.calls.notices.length, 1);
+    assert.equal(h.calls.notices[0][1].category, "transfer");
+    await h.emit(userB);
+    assert.ok(h.value.transactions.every((item) => item.id !== "SIM-1"));
+    assert.equal(h.value.balance, 1840.50);
   } finally { await h.close(); }
 });
 
@@ -297,12 +368,18 @@ test("Firebase configura persistencia explícita con AsyncStorage en React Nativ
   assert.equal(received.persistence, "native-persistence");
 });
 
-test("primer acceso crea PIN, almacena solo verificador y al reiniciar exige el PIN", async () => {
+test("configurar el PIN desde el teclado almacena solo el verificador y al reiniciar exige el PIN", async () => {
   const secure = new Map();
   let h = await harness(null, new Map(), secure);
   try {
     await h.emit(null);
     await act(async () => h.value.login("ana@example.com", "account-password"));
+    assert.equal(h.screen(), "PinLogin");
+    await act(async () => h.value.setCurrentScreen("PIN_RECOVERY"));
+    assert.equal(h.screen(), "PinRecovery");
+    await act(async () => h.value.setCurrentScreen("PIN_LOGIN"));
+    assert.equal(h.screen(), "PinLogin");
+    await act(async () => h.value.authorizePinReset("account-password"));
     assert.equal(h.screen(), "NewPassword");
     await act(async () => h.value.setupPin("987654"));
     assert.equal(h.screen(), "Splash");
@@ -376,14 +453,14 @@ test("los 3 intentos persisten al reiniciar y solo la contraseña permite cambia
 test("no se puede crear PIN con una sesión restaurada sin verificar la contraseña", async () => {
   const h = await harness();
   try {
-    await h.emit(userA); assert.equal(h.screen(), "PinRecovery");
+    await h.emit(userA); assert.equal(h.screen(), "PinLogin");
     await act(async () => h.value.setCurrentScreen("NEW_PASSWORD"));
-    assert.equal(h.screen(), "PinRecovery");
+    assert.equal(h.screen(), "PinLogin");
     await assert.rejects(h.value.setupPin("123456"), /Verifica tu contraseña/);
     await act(async () => h.value.authorizePinReset("account-password"));
     await h.appState("background"); await h.appState("active");
     await assert.rejects(h.value.setupPin("123456"), /Verifica tu contraseña/);
-    assert.equal(h.screen(), "PinRecovery");
+    assert.equal(h.screen(), "PinLogin");
   } finally { await h.close(); }
 });
 

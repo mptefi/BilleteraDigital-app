@@ -34,12 +34,12 @@ export default function PinRecoveryScreen() {
     finally { setBusy(false); }
   };
   return <SafeAreaView style={styles.screen}>
-    {pinState.hasPin && <View style={styles.header}>
+    <View style={styles.header}>
       <TouchableOpacity style={styles.backButton} onPress={goBack} disabled={busy}
         accessibilityRole="button" accessibilityLabel="Regresar al teclado PIN" activeOpacity={0.7}>
         <Feather name="arrow-left" size={24} color={COLORS.textPrimary} />
       </TouchableOpacity>
-    </View>}
+    </View>
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.icon}><Feather name="shield" size={32} color={COLORS.primary} /></View>
@@ -62,9 +62,9 @@ export default function PinRecoveryScreen() {
         <TouchableOpacity style={styles.linkButton} onPress={() => setCurrentScreen("RECOVERY_EMAIL")} disabled={busy}>
           <Text style={styles.link}>Olvidé la contraseña de mi cuenta</Text>
         </TouchableOpacity>
-        {pinState.hasPin && <TouchableOpacity style={styles.linkButton} onPress={goBack} disabled={busy}>
+        <TouchableOpacity style={styles.linkButton} onPress={goBack} disabled={busy}>
           <Text style={styles.link}>Volver al teclado PIN</Text>
-        </TouchableOpacity>}
+        </TouchableOpacity>
         <TouchableOpacity style={styles.linkButton} onPress={changeAccount} disabled={busy}><Text style={styles.link}>Cerrar sesión y cambiar cuenta</Text></TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>

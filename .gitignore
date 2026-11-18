@@ -40,3 +40,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase y configuración Android local
+firebase-debug*.log
+ui-debug*.log
+google-services.json
+*service-account*.json

@@ -28,8 +28,10 @@ function TransactionRow({ item, isLast }) {
         </View>
 
         <View style={styles.txDetails}>
-          <Text style={styles.txTitle}>{item.title}</Text>
-          <Text style={styles.txDate}>{item.date}</Text>
+          <Text style={styles.txTitle} numberOfLines={item.simulation ? 1 : undefined}>{item.title}</Text>
+          <Text style={styles.txDate} numberOfLines={item.simulation ? 1 : undefined}>
+            {item.simulation ? `Simulado · ${item.date}` : item.date}
+          </Text>
         </View>
 
         <Text

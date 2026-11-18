@@ -1,15 +1,19 @@
 {
   "expo": {
-    "name": "my-app",
+    "name": "Al Toque",
     "slug": "my-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
+      "bundleIdentifier": "com.altoque.wallet",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.altoque.wallet",
+      "permissions": ["android.permission.SCHEDULE_EXACT_ALARM"],
+      "blockedPermissions": ["android.permission.RECORD_AUDIO"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -22,7 +26,10 @@
     },
     "plugins": [
       "expo-font",
-      "expo-secure-store"
+      ["expo-status-bar", { "style": "dark" }],
+      "expo-secure-store",
+      ["expo-camera", { "cameraPermission": "Al Toque usa la cámara para escanear QR y fotografiar comprobantes.", "recordAudioAndroid": false, "microphonePermission": false }],
+      ["expo-notifications", { "defaultChannel": "movements" }]
     ]
   }
 }

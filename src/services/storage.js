@@ -4,16 +4,21 @@ const STORAGE_KEYS = {
   userPin: "@altoque/user-pin",
   showBalance: "@altoque/show-balance",
   transactions: "@altoque/transactions",
+  simulatedPayments: "@altoque/simulated-payments",
   offers: "@altoque/offers",
+  shakeHistory: "@altoque/shake-history",
+  demoReceipt: "@altoque/receipt",
+  movementReminder: "@altoque/movement-reminder",
 };
 
 export const storageKeys = STORAGE_KEYS;
 
-export async function getStoredJson(key, fallbackValue = null) {
+export async function getStoredJson(key, fallbackValue = null, { throwOnError = false } = {}) {
   try {
     const rawValue = await AsyncStorage.getItem(key);
     return rawValue ? JSON.parse(rawValue) : fallbackValue;
   } catch (error) {
+    if (throwOnError) throw error;
     console.log("AsyncStorage read error:", key, error.message);
     return fallbackValue;
   }
