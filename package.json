@@ -26,7 +26,8 @@
   "scripts": {
     "test": "node --test --test-isolation=none tests/auth.test.cjs tests/apf3.test.cjs",
     "test:emulators": "node tests/firebase-emulators.cjs",
-    "start": "expo start",
+    "api:local": "npx --yes firebase-tools@15.36.0 emulators:start --only functions --project al-toque-808de --config firebase.real-auth.json",
+    "start": "node scripts/start.cjs",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"

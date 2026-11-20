@@ -58,7 +58,10 @@ function NotificationCenter({ uid, onOpenHistory }) {
             : "Recibe un aviso cuando haya novedades en tu cuenta."}
           primaryLabel={needsSettings ? "Abrir Ajustes" : "Permitir"}
           secondaryLabel="Ahora no"
-          onPrimary={() => { setPermissionModal(false); access.allow(); }}
+          onPrimary={async () => {
+            await access.allow();
+            setPermissionModal(false);
+          }}
           onSecondary={() => setPermissionModal(false)}
           onClose={() => setPermissionModal(false)}
         >

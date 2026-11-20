@@ -6,19 +6,21 @@ export default function useFeaturePermission(read, request) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const pending = useRef(false);
+  const revision = useRef(0);
 
   useEffect(() => {
     let active = true;
     const refresh = async () => {
       if (pending.current) return;
+      const version = ++revision.current;
       try {
         const result = await read();
-        if (active && !pending.current) {
+        if (active && version === revision.current) {
           setPermission(result);
           setError("");
         }
       } catch {
-        if (active) setError("No pudimos consultar el permiso.");
+        if (active && version === revision.current) setError("No pudimos consultar el permiso.");
       }
     };
     refresh();
@@ -34,6 +36,7 @@ export default function useFeaturePermission(read, request) {
   const allow = useCallback(async () => {
     if (pending.current) return;
     pending.current = true;
+    revision.current++;
     setBusy(true);
     setError("");
     try {

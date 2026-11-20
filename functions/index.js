@@ -6,6 +6,6 @@ const { qrHandler } = require("./qrHandler");
 
 initializeApp();
 
-exports.api = onRequest((req, res) =>
+exports.api = onRequest({ cors: true }, (req, res) =>
   qrHandler(req, res, (token) => getAuth().verifyIdToken(token), error)
 );

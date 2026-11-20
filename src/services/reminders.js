@@ -33,8 +33,7 @@ async function prepareChannel() {
   }
 }
 
-export async function readReminderPermission() {
-  const permission = await Notifications.getPermissionsAsync();
+function normalizeReminderPermission(permission) {
   return {
     ...permission,
     granted: permission.granted || (Platform.OS === "ios" &&
@@ -42,10 +41,20 @@ export async function readReminderPermission() {
   };
 }
 
+export async function readReminderPermission() {
+  return normalizeReminderPermission(await Notifications.getPermissionsAsync());
+}
+
 export async function requestReminderPermission() {
   await prepareChannel();
-  await Notifications.requestPermissionsAsync();
-  return readReminderPermission();
+  const existing = await readReminderPermission();
+  if (existing.granted || existing.canAskAgain === false) return existing;
+
+  const permission = await Notifications.requestPermissionsAsync({
+    android: {},
+    ios: { allowAlert: true, allowSound: true, allowBadge: true },
+  });
+  return normalizeReminderPermission(permission);
 }
 
 export async function sendActivityNotification(uid, activity) {

@@ -29,12 +29,17 @@ async function main() {
   const email = `apf3-${randomUUID()}@example.test`;
   const { user } = await createUserWithEmailAndPassword(auth, email, "Demo-APF3-2026!");
   const token = await user.getIdToken();
+  const metroOrigin = process.env.TEST_QR_METRO_ORIGIN;
   const { validateQrWithSession } = load("src/services/qrApi.js", {
     "../config/firebase": { auth },
     "../../functions/qr": require("../functions/qr"),
+    "expo/internal/bundle-origin": { getBundleOrigin: () => metroOrigin },
   }, {
     __DEV__: true,
-    process: { env: { EXPO_PUBLIC_ALTOQUE_API_URL: endpoint.replace(/\/qr\/validate$/, "") } },
+    process: { env: metroOrigin
+      ? { EXPO_PUBLIC_ALTOQUE_METRO_API: "1" }
+      : { EXPO_PUBLIC_ALTOQUE_API_URL: endpoint.replace(/\/qr\/validate$/, "") },
+    },
   });
   const fromApp = await validateQrWithSession(JSON.stringify(valid));
   assert.equal(fromApp.uid, user.uid);

@@ -6,7 +6,16 @@ El inventario de pantallas, archivos y conceptos del curso está en la [document
 
 ## Ejecutar la demo
 
-Requiere Node.js 22.13 o posterior dentro de la versión 22, npm y un teléfono Android o un AVD. Para compilar el development build local, Expo SDK 58 usa Android SDK Platform 37 y Build Tools 37.0.0.
+Requiere Node.js 22.13 o posterior dentro de la versión 22, npm y [Expo Go compatible con SDK 58](https://expo.dev/go?sdkVersion=58&platform=android&device=true). Desde la carpeta del repositorio, instala las dependencias y abre el proyecto.
+
+```sh
+npm ci
+npm start
+```
+
+Conecta el teléfono y la laptop a la misma red. Escanea el QR de la terminal con Expo Go e inicia sesión con una cuenta de Al Toque. Metro sirve tanto el proyecto como la ruta de validación de QR. El primer arranque instala las dependencias de Firebase Admin si faltan. Para una red que aísla los dispositivos, usa `npm start -- --tunnel`. El inicio de sesión y la validación de tokens requieren internet.
+
+### Pruebas con Firebase Emulator Suite
 
 ```sh
 npm ci
@@ -44,11 +53,13 @@ Expo SDK 58 da prioridad a `.env.development.local` al iniciar Metro. Si ese arc
 Para validar QR con esa cuenta mientras el endpoint se ejecuta localmente, inicia solo Functions para el proyecto real y conecta el Android por USB.
 
 ```sh
-npx firebase-tools@15.36.0 emulators:start --only functions --project al-toque-808de --config firebase.real-auth.json
+npm run api:local
 adb reverse tcp:5011 tcp:5011
 ```
 
 Configura `EXPO_PUBLIC_ALTOQUE_API_URL=http://127.0.0.1:5011/al-toque-808de/us-central1/api` en `.env.development.local`. Así la conexión a la API viaja por el túnel local de ADB. El inicio de sesión con Firebase real funciona por Internet desde la app.
+
+Deja `npm run api:local` abierto mientras usas el escáner. Si desconectas el Android o reinicias el AVD, vuelve a ejecutar `adb reverse tcp:5011 tcp:5011`.
 
 ## Flujos y arquitectura
 
@@ -71,6 +82,8 @@ El PIN sigue protegiendo el acceso local. El APF2 mantiene Firebase Auth y su re
 
 ## QR para exposición
 
+En la laptop de la exposición, abre el proyecto con `npm start` y deja la terminal abierta mientras lo usas en Expo Go.
+
 Abre estas imágenes desde otro dispositivo o imprímelas. El valor codificado es JSON UTF-8 de hasta 512 caracteres. Usa `type: "altoque.demo"`, `v: 1`, destinatario de 2 a 60 caracteres, monto entero de 1 a 100000 centavos y moneda `PEN` o `USD`.
 
 | Prueba | Imagen | Datos |
@@ -85,7 +98,7 @@ Abre estas imágenes desde otro dispositivo o imprímelas. El valor codificado e
 
 El campo opcional `direction` admite `debit` para un pago y `credit` para una transferencia recibida. El QR de pago original se interpreta como `debit`. El importe del código siempre es positivo. Las operaciones en USD y las simulaciones guardadas antes de esta mejora aparecen en el historial sin ajuste al saldo simulado en soles.
 
-1. Inicia Firebase y abre el development build como se indica en [Ejecutar la demo](#ejecutar-la-demo). Entra con una cuenta de prueba y desbloquea la app.
+1. Abre el proyecto en Expo Go, entra con una cuenta de prueba y desbloquea la app.
 2. Abre `assets/apf3/qr-invalido.png` en la laptop. En Inicio → QR, escanéalo y verifica el mensaje **QR inválido**. Pulsa **Volver a escanear**.
 3. Abre `assets/apf3/qr-valido.png` y escanéalo. El resumen debe mostrar **Cafetería Demo**, **S/ 12.50** y **PEN**. Pulsa **Cancelar** para volver al escáner y comprobar que esa acción no guarda un movimiento.
 4. Escanea de nuevo el QR válido y pulsa **Confirmar simulación** dos veces seguidas. Debe aparecer un solo comprobante con número de operación, fecha de Lima e importe.

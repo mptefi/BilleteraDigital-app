@@ -45,31 +45,73 @@ test("QR REST rechaza rutas y métodos ajenos y devuelve un 500 genérico ante e
 test("cliente REST adjunta el token de Firebase y traduce fallos de la API", async () => {
   let failure;
   let request;
+  let payment = { uid: "A", simulation: true, ...parseDemoQr(JSON.stringify(valid)) };
+  const env = { EXPO_PUBLIC_ALTOQUE_API_URL: "http://localhost:5001/api/" };
   const auth = { currentUser: { uid: "A", getIdToken: async () => "id-token" } };
   const api = load("src/services/qrApi.js", {
     "../../functions/qr": { parseDemoQr },
     "../config/firebase": { auth },
+    "expo/internal/bundle-origin": { getBundleOrigin: () => "https://expo-tunnel.example.test" },
     axios: {
-      isAxiosError: () => true,
+      isAxiosError: (error) => error === failure,
       post: async (...args) => {
         request = args;
         if (failure) throw failure;
-        return { data: { uid: "A", simulation: true, recipient: "Cafetería Demo" } };
+        return { data: payment };
       },
     },
-  }, { process: { env: { EXPO_PUBLIC_ALTOQUE_API_URL: "http://localhost:5001/api/" } }, __DEV__: true });
+  }, { process: { env }, __DEV__: true });
   const raw = JSON.stringify(valid);
   await api.validateQrWithSession(raw);
   assert.equal(request[0], "http://localhost:5001/api/qr/validate");
   assert.equal(request[1].qr, raw);
   assert.equal(request[2].headers.Authorization, "Bearer id-token");
 
-  for (const [status, message] of [[400, /rechazó/], [401, /sesión/], [500, /API no pudo/], [null, /conectarnos/]]) {
+  env.EXPO_PUBLIC_ALTOQUE_API_URL = "http://localhost:5001/api/qr/validate/";
+  await api.validateQrWithSession(raw);
+  assert.equal(request[0], "http://localhost:5001/api/qr/validate");
+  env.EXPO_PUBLIC_ALTOQUE_API_URL = "";
+  env.EXPO_PUBLIC_ALTOQUE_METRO_API = "1";
+  await api.validateQrWithSession(raw);
+  assert.equal(request[0], "https://expo-tunnel.example.test/altoque-api/qr/validate");
+  env.EXPO_PUBLIC_ALTOQUE_API_URL = "http://localhost:5001/api/";
+  payment = { ...payment, amountCents: 100 };
+  await assert.rejects(api.validateQrWithSession(raw), /no coinciden/);
+
+  for (const [status, message] of [[400, /rechazó/], [401, /sesión/], [404, /ruta/], [500, /API no pudo/], [null, /API local/]]) {
     failure = status ? { response: { status } } : {};
     await assert.rejects(api.validateQrWithSession(raw), message);
   }
   auth.currentUser = null;
   await assert.rejects(api.validateQrWithSession(raw), /Inicia sesión/);
+});
+
+test("Android prepara el canal y solicita el permiso de avisos con opciones nativas explícitas", async () => {
+  const calls = [];
+  let current = { granted: false, canAskAgain: true };
+  const { requestReminderPermission } = load("src/services/reminders.js", {
+    "react-native": { Platform: { OS: "android" } },
+    "expo-constants": {},
+    "expo-device": {},
+    "./storage": {},
+    "./notificationActivity": {},
+    "expo-notifications": {
+      setNotificationHandler() {},
+      AndroidImportance: { HIGH: 4 },
+      setNotificationChannelAsync: async (id) => { calls.push(id); },
+      getPermissionsAsync: async () => current,
+      requestPermissionsAsync: async (options) => {
+        assert.ok(options.android);
+        calls.push("request");
+        current = { granted: true, canAskAgain: true };
+        return current;
+      },
+    },
+  });
+  assert.equal((await requestReminderPermission()).granted, true);
+  assert.deepEqual(calls, ["movements", "request"]);
+  assert.equal((await requestReminderPermission()).granted, true);
+  assert.deepEqual(calls, ["movements", "request", "movements"]);
 });
 
 test("pantalla QR rechaza datos inválidos, evita lecturas duplicadas y confirma la simulación", async () => {
