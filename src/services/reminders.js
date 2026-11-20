@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from "react-native";
+import { Linking, PermissionsAndroid, Platform } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
@@ -47,54 +47,39 @@ function normalizeReminderPermission(permission) {
 }
 
 export async function readReminderPermission() {
-  if (usesAndroidRuntimePermission) {
-    // Android can report whether Expo Go has permission without consulting Expo's saved request history.
-    const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-    return { granted, status: granted ? "granted" : "undetermined" };
-  }
-  return normalizeReminderPermission(await Notifications.getPermissionsAsync());
+  const permission = normalizeReminderPermission(await Notifications.getPermissionsAsync());
+  if (!usesAndroidRuntimePermission) return permission;
+
+  // Confirm the host app's permission without treating Expo Go's saved denial as a system block.
+  const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+  return { granted, status: granted ? "granted" : "undetermined" };
 }
 
 export async function requestReminderPermission() {
-  console.log("[NOTIFICACIONES] Iniciando solicitud", {
-    isExpoGo,
-    platform: Platform.OS,
-    version: Platform.Version,
-  });
-
   const existing = await readReminderPermission();
+  if (existing.granted || existing.canAskAgain === false) return existing;
 
-  if (existing.granted) {
-    console.log("[NOTIFICACIONES] Ya autorizado");
-    return existing;
+  await prepareChannel();
+  return normalizeReminderPermission(await Notifications.requestPermissionsAsync({
+    android: {},
+    ios: { allowAlert: true, allowSound: true, allowBadge: true },
+  }));
+}
+
+export async function openNotificationSettings() {
+  if (Platform.OS === "android") {
+    const packageName = isExpoGo ? "host.exp.exponent" : (Constants.expoConfig?.android?.package ?? "com.altoque.wallet");
+    try {
+      // Opens this app's "Notificaciones" page directly (Android 8+).
+      await Linking.sendIntent("android.settings.APP_NOTIFICATION_SETTINGS", [
+        { key: "android.provider.extra.APP_PACKAGE", value: packageName },
+      ]);
+      return;
+    } catch {
+      // Fall back to the general app settings page.
+    }
   }
-
-  if (Platform.OS === "android" && !isExpoGo) {
-    await prepareChannel();
-  }
-
-  console.log("[NOTIFICACIONES] Solicitando mediante Expo...");
-
-  try {
-    const result = await Notifications.requestPermissionsAsync();
-
-    console.log("[NOTIFICACIONES] Resultado Expo:", result);
-
-    const latest = await readReminderPermission();
-
-    return {
-      ...result,
-      granted: latest.granted || result.granted,
-      status:
-        latest.granted || result.granted
-          ? "granted"
-          : "denied",
-      canAskAgain: result.canAskAgain,
-    };
-  } catch (error) {
-    console.error("[NOTIFICACIONES] Error:", error);
-    throw error;
-  }
+  await Linking.openSettings();
 }
 
 export async function readNotificationPreference(uid) {

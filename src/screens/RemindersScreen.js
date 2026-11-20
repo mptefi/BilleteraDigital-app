@@ -11,7 +11,7 @@ import { COLORS } from "../theme/colors";
 import { demoPromoActivity } from "../services/notificationActivity";
 import { getStoredJson, setStoredJson, storageKeys } from "../services/storage";
 import {
-  cancelReminder, findReminder, getDemoPushToken, readNotificationPreference, readReminderPermission,
+  cancelReminder, findReminder, getDemoPushToken, openNotificationSettings, readNotificationPreference, readReminderPermission,
   remindersSupported, requestReminderPermission, scheduleReminder, sendActivityNotification, setNotificationPreference,
 } from "../services/reminders";
 
@@ -26,7 +26,7 @@ export default function RemindersScreen({ uid, onBack, onOpenHistory }) {
 }
 
 function NotificationCenter({ uid, onOpenHistory }) {
-  const { transactions } = useAuth();
+  const { transactions, rememberPermissionScreen } = useAuth();
   const access = useFeaturePermission(readReminderPermission, requestReminderPermission);
   const [toolsVisible, setToolsVisible] = useState(false);
   const [enabled, setEnabled] = useState(null);
@@ -59,12 +59,24 @@ function NotificationCenter({ uid, onOpenHistory }) {
     }
   };
 
+  const openSettings = async () => {
+    setPreferenceError("");
+    try {
+      await rememberPermissionScreen();
+      await openNotificationSettings();
+    } catch {
+      setPreferenceError("No pudimos abrir Ajustes.");
+    }
+  };
+
   if (enabled === null || (!access.permission && !access.error)) {
     return <FeatureStatus title="Preparando tus avisos" loadingLabel="Consultando el permiso de notificaciones" />;
   }
 
   if (!granted || !enabled) {
-    const feedback = access.error || preferenceError || (blocked && "El sistema ya no permite volver a solicitar este permiso.");
+    const permissionMessage = !blocked && access.denied && "Permiso de notificaciones no concedido.";
+    const feedback = access.error || preferenceError || permissionMessage;
+    const canOfferSettingsWithRetry = access.denied && access.permission?.canAskAgain === undefined;
     return (
       <>
         <FeaturePermission
@@ -74,8 +86,11 @@ function NotificationCenter({ uid, onOpenHistory }) {
           reason="Entérate de los pagos, transferencias, promos y alertas de seguridad."
           buttonLabel="Permitir notificaciones"
           dialogTitle="Permite las notificaciones"
+          blockedMessage="El sistema requiere que habilites las notificaciones desde Ajustes."
+          onOpenSettings={blocked ? openSettings : undefined}
         />
         {!!feedback && <Text accessibilityLiveRegion="polite" style={styles.permissionNote}>{feedback}</Text>}
+        {canOfferSettingsWithRetry && <FeatureButton secondary label="Abrir Ajustes" onPress={openSettings} />}
       </>
     );
   }

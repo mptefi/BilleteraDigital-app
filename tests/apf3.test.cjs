@@ -155,16 +155,19 @@ test("Expo Go usa el canal predeterminado para activar, enviar y programar aviso
   assert.equal(Object.hasOwn(requests[1].trigger, "channelId"), false);
 });
 
-test("Expo Go consulta a Android y puede reintentar tras un resultado de bloqueo anterior", async () => {
+test("Expo Go solicita con Expo Notifications y permite reintentar tras un rechazo anterior", async () => {
   let allowed = false;
-  let requests = 0;
-  let nativeResult = { granted: false, canAskAgain: false, status: "denied" };
-  const { readReminderPermission, requestReminderPermission } = load("src/services/reminders.js", {
+  let expoRequests = 0;
+  let nextPermission = { granted: false, canAskAgain: false, status: "denied" };
+  const intents = [];
+  const { readReminderPermission, requestReminderPermission, openNotificationSettings } = load("src/services/reminders.js", {
     "react-native": {
       Platform: { OS: "android", Version: 36 },
+      Linking: { sendIntent: async (...args) => { intents.push(args); }, openSettings: async () => assert.fail() },
       PermissionsAndroid: {
-        PERMISSIONS: { POST_NOTIFICATIONS: "notifications" },
+        PERMISSIONS: { POST_NOTIFICATIONS: "android.permission.POST_NOTIFICATIONS" },
         check: async () => allowed,
+        request: async () => assert.fail("La solicitud debe pasar por expo-notifications"),
       },
     },
     expo: { isRunningInExpoGo: () => true },
@@ -176,22 +179,26 @@ test("Expo Go consulta a Android y puede reintentar tras un resultado de bloqueo
       setNotificationHandler() {},
       getPermissionsAsync: async () => ({ granted: false, canAskAgain: false, status: "denied" }),
       requestPermissionsAsync: async () => {
-        requests++;
-        allowed = nativeResult.granted;
-        return nativeResult;
+        expoRequests++;
+        allowed = nextPermission.granted;
+        return nextPermission;
       },
     },
   });
   assert.equal((await readReminderPermission()).canAskAgain, undefined);
-  assert.equal(requests, 0);
-  assert.equal((await requestReminderPermission()).canAskAgain, false);
-  assert.equal(requests, 1);
+  assert.equal(expoRequests, 0);
+  assert.equal((await requestReminderPermission()).granted, false);
+  assert.equal(expoRequests, 1);
   assert.equal((await readReminderPermission()).canAskAgain, undefined);
-  nativeResult = { granted: true, canAskAgain: true, status: "granted" };
+  nextPermission = { granted: true, canAskAgain: true, status: "granted" };
   assert.equal((await requestReminderPermission()).granted, true);
   assert.equal((await readReminderPermission()).granted, true);
   assert.equal((await requestReminderPermission()).granted, true);
-  assert.equal(requests, 2);
+  assert.equal(expoRequests, 2);
+  assert.equal(intents.length, 0);
+  await openNotificationSettings();
+  assert.equal(intents[0][0], "android.settings.APP_NOTIFICATION_SETTINGS");
+  assert.equal(intents[0][1][0].value, "host.exp.exponent");
 });
 
 test("pantalla QR rechaza datos inválidos, evita lecturas duplicadas y confirma la simulación", async () => {
@@ -356,9 +363,10 @@ test("la bandeja y la promo esperan el permiso y el rechazo conserva Notificacio
   const timers = new Map();
   const sent = [];
   let devicePermission = { granted: false, status: "denied", canAskAgain: true };
-  let nextPermission = { ...devicePermission };
+  let nextPermission = { granted: false, status: "undetermined" };
   let requests = 0;
   let wentBack = 0;
+  let settingsOpened = 0;
   let timerId = 0;
   let onAppStateChange;
   const { readReminderPermission, requestReminderPermission } = load("src/services/reminders.js", {
@@ -421,6 +429,7 @@ test("la bandeja y la promo esperan el permiso y el rechazo conserva Notificacio
       findReminder: async () => null,
       readReminderPermission,
       requestReminderPermission,
+      openNotificationSettings: async () => { settingsOpened++; },
       readNotificationPreference: async (uid) => saved.get(`notification/${uid}`) === true,
       setNotificationPreference: async (uid, enabled) => Boolean(saved.set(`notification/${uid}`, enabled)),
       sendActivityNotification: async (uid, item) => { sent.push([uid, item]); },
@@ -433,7 +442,8 @@ test("la bandeja y la promo esperan el permiso y el rechazo conserva Notificacio
   const open = () => act(async () => {
     root = create(React.createElement(RemindersScreen, { uid: "A", onBack: () => { wentBack++; } }));
   });
-  const openPermissionModal = () => act(async () => root.root.findByType("Button").props.onPress());
+  const permissionButton = () => root.root.findAllByType("Button").find((button) => button.props.label === "Permitir notificaciones");
+  const openPermissionModal = () => act(async () => permissionButton().props.onPress());
   const confirmPermission = () => act(async () => root.root.findByType("Modal").props.onPrimary());
   await open();
   assert.equal(root.root.findAllByType("Inbox").length, 0);
@@ -454,7 +464,10 @@ test("la bandeja y la promo esperan el permiso y el rechazo conserva Notificacio
   assert.equal(root.root.findAllByType("Modal").length, 0);
   assert.equal(wentBack, 0);
   assert.equal(root.root.findAllByType("Status").length, 1);
-  assert.equal(root.root.findByType("Button").props.disabled, false);
+  assert.equal(permissionButton().props.disabled, false);
+  assert.ok(root.root.findAllByType("Button").some((button) => button.props.label === "Abrir Ajustes"));
+  assert.equal(settingsOpened, 0);
+  assert.equal(root.root.findByType("Text").props.children, "Permiso de notificaciones no concedido.");
   assert.equal(root.root.findAllByType("Inbox").length, 0);
   assert.equal(timers.size, 0);
   nextPermission = { granted: true, status: "granted", canAskAgain: true };
@@ -483,12 +496,13 @@ test("la bandeja y la promo esperan el permiso y el rechazo conserva Notificacio
   nextPermission = devicePermission;
   await open();
   assert.equal(root.root.findAllByType("Inbox").length, 0);
-  assert.equal(root.root.findByType("Button").props.label, "Permitir notificaciones");
-  assert.equal(root.root.findAllByType("Status").length, 1);
+  const settingsButton = root.root.findByType("Button");
+  assert.equal(settingsButton.props.label, "Abrir Ajustes");
+  assert.equal(root.root.findAllByType("Status").length, 2);
   assert.equal(root.root.findAllByType("Pressable").length, 0);
-  assert.match(root.root.findByType("Text").props.children, /El sistema ya no permite/);
-  await openPermissionModal();
-  await confirmPermission();
+  assert.equal(root.root.findAllByType("Text").length, 0);
+  await act(async () => settingsButton.props.onPress());
+  assert.equal(settingsOpened, 1);
   assert.equal(requests, 2);
   assert.equal(root.root.findAllByType("Modal").length, 0);
   assert.equal(root.root.findAllByType("Inbox").length, 0);
