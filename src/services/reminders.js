@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { PermissionsAndroid, Platform } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
@@ -10,7 +10,9 @@ export const remindersSupported = Platform.OS === "android" || Platform.OS === "
 export const movementChannel = "movements";
 const isExpoGo = isRunningInExpoGo();
 const usesCustomAndroidChannels = Platform.OS === "android" && !isExpoGo;
+const usesAndroidRuntimePermission = isExpoGo && Platform.OS === "android" && Platform.Version >= 33;
 const reminderKey = (uid) => `${storageKeys.movementReminder}/${uid}`;
+const notificationPreferenceKey = (uid) => `${storageKeys.notificationPreference}/${uid}`;
 let reminderWork = Promise.resolve();
 
 function updateReminder(action) {
@@ -45,37 +47,87 @@ function normalizeReminderPermission(permission) {
 }
 
 export async function readReminderPermission() {
+  if (usesAndroidRuntimePermission) {
+    // Android can report whether Expo Go has permission without consulting Expo's saved request history.
+    const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    return { granted, status: granted ? "granted" : "undetermined" };
+  }
   return normalizeReminderPermission(await Notifications.getPermissionsAsync());
 }
 
 export async function requestReminderPermission() {
-  const existing = await readReminderPermission();
-  if (existing.granted || existing.canAskAgain === false) return existing;
-
-  await prepareChannel();
-  const permission = await Notifications.requestPermissionsAsync({
-    android: {},
-    ios: { allowAlert: true, allowSound: true, allowBadge: true },
+  console.log("[NOTIFICACIONES] Iniciando solicitud", {
+    isExpoGo,
+    platform: Platform.OS,
+    version: Platform.Version,
   });
-  return normalizeReminderPermission(permission);
+
+  const existing = await readReminderPermission();
+
+  if (existing.granted) {
+    console.log("[NOTIFICACIONES] Ya autorizado");
+    return existing;
+  }
+
+  if (Platform.OS === "android" && !isExpoGo) {
+    await prepareChannel();
+  }
+
+  console.log("[NOTIFICACIONES] Solicitando mediante Expo...");
+
+  try {
+    const result = await Notifications.requestPermissionsAsync();
+
+    console.log("[NOTIFICACIONES] Resultado Expo:", result);
+
+    const latest = await readReminderPermission();
+
+    return {
+      ...result,
+      granted: latest.granted || result.granted,
+      status:
+        latest.granted || result.granted
+          ? "granted"
+          : "denied",
+      canAskAgain: result.canAskAgain,
+    };
+  } catch (error) {
+    console.error("[NOTIFICACIONES] Error:", error);
+    throw error;
+  }
+}
+
+export async function readNotificationPreference(uid) {
+  return (await getStoredJson(notificationPreferenceKey(uid), false)) === true;
+}
+
+export async function setNotificationPreference(uid, enabled) {
+  if (!enabled) await cancelReminder(uid);
+  return setStoredJson(notificationPreferenceKey(uid), enabled);
 }
 
 export async function sendActivityNotification(uid, activity) {
-  if (!remindersSupported || !(await readReminderPermission()).granted) return false;
+  if (!remindersSupported || !(await readNotificationPreference(uid)) || !(await readReminderPermission()).granted) return false;
   const channel = `altoque-${activity.category}`;
+  const isMovement = !activity.example && ["payment", "transfer"].includes(activity.category);
   if (usesCustomAndroidChannels) {
     await Notifications.setNotificationChannelAsync(channel, {
       name: activityCategories[activity.category].label,
       importance: activity.category === "promo" ? Notifications.AndroidImportance.DEFAULT : Notifications.AndroidImportance.HIGH,
     });
   }
+  const body = activity.category === "promo" ? activity.message : isMovement
+    ? "Consulta el detalle de tu operación por QR en Al Toque."
+    : "Abre Al Toque para ver los detalles.";
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: activity.example ? `Prueba · ${activity.title}` : `${activity.title} · Simulado`,
-      body: "Abre Al Toque para ver los detalles.",
+      title: activity.category === "promo"
+        ? activity.title
+        : activity.example ? `Prueba · ${activity.title}` : `${activity.title} · Simulado`,
+      body,
       data: {
         uid,
-        route: !activity.example && ["payment", "transfer"].includes(activity.category) ? "movements" : "notifications",
+        route: isMovement ? "movements" : "notifications",
       },
     },
     trigger: usesCustomAndroidChannels ? { channelId: channel } : null,

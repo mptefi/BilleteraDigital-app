@@ -7,6 +7,7 @@ const { create, act } = require("react-test-renderer");
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
 const errors = load("src/services/authErrors.js");
+const { notificationActivity } = load("src/services/notificationActivity.js");
 const userA = { uid: "A", email: "ana@example.com", displayName: "Ana" };
 const userB = { uid: "B", email: "bea@example.com", displayName: "Bea" };
 
@@ -47,7 +48,7 @@ async function harness(initialUser = null, saved = new Map(), secureSaved = new 
     },
   };
   const storage = {
-    storageKeys: { userPin: "pin", showBalance: "balance", transactions: "transactions", simulatedPayments: "simulations" },
+    storageKeys: { userPin: "pin", showBalance: "balance", transactions: "transactions", simulatedPayments: "simulations", permissionReturn: "notification-return" },
     getStoredJson: async (key, fallback) => saved.has(key) ? saved.get(key) : fallback,
     setStoredJson: async (key, value) => { calls.writes.push([key, value]); saved.set(key, value); return true; },
     removeStoredValue: async (key) => { saved.delete(key); },
@@ -151,6 +152,94 @@ test("login usa el SDK y no guarda la contraseña en almacenamiento propio", asy
   } finally { await h.close(); }
 });
 
+test("al volver de un permiso conserva Notificaciones después de desbloquear", async () => {
+  const h = await harness(userA, new Map([["notification-return/A", Date.now() + 10_000]]));
+  try {
+    await h.vault.savePin("A", "654321");
+    await h.emit(userA);
+    assert.equal(h.screen(), "PinLogin");
+    await act(async () => h.value.unlockWithPin("654321"));
+    assert.equal(h.screen(), "Reminders");
+    assert.equal(h.saved.has("notification-return/A"), false);
+    await h.emit({ ...userA });
+    assert.equal(h.screen(), "Reminders");
+    await h.appState("background");
+    await h.appState("active");
+    assert.equal(h.screen(), "PinLogin");
+    await act(async () => h.value.unlockWithPin("654321"));
+    assert.equal(h.screen(), "Reminders");
+  } finally { await h.close(); }
+});
+
+test("la app recupera la pantalla del permiso o de una interrupción del sistema", async () => {
+  const saved = new Map();
+  const secure = new Map();
+  for (const [route, screen] of [["QR", "Qr"], ["RECEIPT", "Receipt"], ["REMINDERS", "Reminders"], ["PROFILE", "Profile"]]) {
+    let h = await harness(userA, saved, secure);
+    try {
+      if (secure.size === 0) await h.vault.savePin("A", "654321");
+      await h.emit(userA);
+      await act(async () => h.value.unlockWithPin("654321"));
+      await act(async () => h.value.setCurrentScreen(route));
+      await act(async () => h.value.rememberPermissionScreen());
+      assert.equal(saved.get("notification-return/A").screen, route);
+    } finally { await h.close(); }
+
+    h = await harness(userA, saved, secure);
+    try {
+      await h.emit(userA);
+      assert.equal(h.screen(), "PinLogin");
+      await act(async () => h.value.unlockWithPin("654321"));
+      assert.equal(h.screen(), screen);
+      assert.equal(saved.has("notification-return/A"), false);
+      await h.appState("background");
+      assert.equal(saved.get("notification-return/A").screen, route);
+      await h.appState("active");
+      await act(async () => h.value.unlockWithPin("654321"));
+      assert.equal(h.screen(), screen);
+      await act(async () => h.value.setCurrentScreen("HOME"));
+      assert.equal(saved.has("notification-return/A"), false);
+    } finally { await h.close(); }
+  }
+});
+
+test("el diálogo nativo conserva la pantalla mientras Android cambia a segundo plano y regresa", async () => {
+  const h = await harness(userA);
+  try {
+    await h.vault.savePin("A", "654321");
+    await h.emit(userA);
+    await act(async () => h.value.unlockWithPin("654321"));
+    for (const [route, screen, granted] of [["REMINDERS", "Reminders", true], ["QR", "Qr", false]]) {
+      await act(async () => h.value.setCurrentScreen(route));
+      let resolveNative;
+      const nativeResult = new Promise((resolve) => { resolveNative = resolve; });
+      let result;
+      await act(async () => { h.value.runNativePermission(() => nativeResult).then((value) => { result = value; }); });
+      await h.appState("background");
+      assert.equal(h.screen(), screen);
+      await act(async () => { resolveNative({ granted }); });
+      assert.equal(result, undefined);
+      assert.equal(h.screen(), screen);
+      await h.appState("active");
+      assert.equal(result.granted, granted);
+      assert.equal(h.screen(), screen);
+      assert.equal(h.value.pinState.status, "unlocked");
+    }
+    let resolveAbandoned;
+    const abandoned = new Promise((resolve) => { resolveAbandoned = resolve; });
+    await act(async () => { h.value.runNativePermission(() => abandoned); });
+    await h.appState("background");
+    await act(async () => { resolveAbandoned({ granted: false }); });
+    await h.finishPinInitialization();
+    await h.appState("active");
+    assert.equal(h.screen(), "PinLogin");
+    await act(async () => h.value.unlockWithPin("654321"));
+    await h.appState("background");
+    await h.appState("active");
+    assert.equal(h.screen(), "PinLogin");
+  } finally { await h.close(); }
+});
+
 test("al volver a iniciar sesión muestra el teclado y conserva el PIN existente", async () => {
   const h = await harness();
   try {
@@ -201,6 +290,10 @@ test("aplica cada pago o ingreso una sola vez y restaura su saldo e historial po
     assert.equal(h.calls.notices.length, 1);
     assert.equal(h.calls.notices[0][0], "A");
     assert.equal(h.calls.notices[0][1].category, "payment");
+    const paymentActivity = notificationActivity(h.value.transactions).filter((item) => item.category === "payment" && item.id === "SIM-1");
+    assert.equal(paymentActivity.length, 1);
+    assert.equal(paymentActivity[0].message, "Cafetería Demo · - S/ 12.50");
+    assert.equal(paymentActivity[0].example, false);
     assert.equal(h.value.balance, 1828.00);
     assert.equal(h.value.transactions.length, 3);
     assert.equal(h.value.transactions[0].amount, "- S/ 12.50");
@@ -229,6 +322,10 @@ test("aplica cada pago o ingreso una sola vez y restaura su saldo e historial po
     assert.equal(h.calls.writes.filter(([key]) => key === "simulations/A").length, 1);
     assert.equal(h.calls.notices.length, 1);
     assert.equal(h.calls.notices[0][1].category, "transfer");
+    const transferActivity = notificationActivity(h.value.transactions).filter((item) => item.category === "transfer");
+    assert.equal(transferActivity.length, 1);
+    assert.equal(transferActivity[0].id, "SIM-2");
+    assert.equal(transferActivity[0].message, "María Demo · + S/ 12.50");
     await h.emit(userB);
     assert.ok(h.value.transactions.every((item) => item.id !== "SIM-1"));
     assert.equal(h.value.balance, 1840.50);

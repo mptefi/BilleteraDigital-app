@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS } from "../theme/colors";
-import { useAuth } from "../context/AuthContext";
+import { screenAfterPin, useAuth } from "../context/AuthContext";
 import AppModal from "../components/AppModal";
 import { Feather } from "@expo/vector-icons";
 
@@ -64,7 +64,7 @@ export default function PinLoginScreen() {
     try {
       const result = await unlockWithPin(nextPin);
       if (result.success) {
-        setCurrentScreen((screen) => ["QR", "RECEIPT", "REMINDERS", "HISTORY"].includes(screen) ? screen : "HOME");
+        setCurrentScreen(screenAfterPin);
       }
       else if (!result.interrupted) setModalConfig({
         title: result.remainingAttempts === 0 ? "Acceso por PIN bloqueado" : "PIN incorrecto",

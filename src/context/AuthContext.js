@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import { auth } from "../config/firebase";
 import { sendPasswordResetEmail, onAuthStateChanged, signInWithEmailAndPassword,
@@ -22,6 +23,12 @@ import {
 } from "../services/storage";
 
 const AuthContext = createContext();
+const resumableScreens = new Set(["QR", "RECEIPT", "REMINDERS", "HISTORY", "PROFILE"]);
+const permissionReturnDuration = 5 * 60_000;
+
+export function screenAfterPin(screen) {
+  return resumableScreens.has(screen) ? screen : "HOME";
+}
 
 const initialTransactions = [
   {
@@ -79,9 +86,34 @@ export const AuthProvider = ({ children }) => {
   const [isStorageReady, setIsStorageReady] = useState(false);
   const pinLock = usePinLock(user);
   const { lockSession, allowPinSetupAfterRegistration } = pinLock;
+  const observedUid = useRef(undefined);
+  const permissionReturn = useRef(null);
+
+  const rememberPermissionScreen = useCallback(async () => {
+    const uid = user?.uid;
+    if (!uid || auth.currentUser?.uid !== uid || !resumableScreens.has(currentScreen)) return;
+    const key = `${storageKeys.permissionReturn}/${uid}`;
+    permissionReturn.current = { key, uid, screen: currentScreen };
+    await setStoredJson(key, { screen: currentScreen, expiresAt: Date.now() + permissionReturnDuration });
+  }, [currentScreen, user?.uid]);
+
+  useEffect(() => {
+    const saved = permissionReturn.current;
+    if (saved && (saved.uid !== user?.uid || saved.screen !== currentScreen)) {
+      permissionReturn.current = null;
+      removeStoredValue(saved.key);
+    }
+  }, [currentScreen, user?.uid]);
+
+  useEffect(() => {
+    if (isStorageReady && !pinLock.isAppActive) rememberPermissionScreen();
+  }, [isStorageReady, pinLock.isAppActive, rememberPermissionScreen]);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (nextUser) => {
+      const uid = nextUser?.uid ?? null;
+      if (observedUid.current === uid) return;
+      observedUid.current = uid;
       lockSession();
       setUser(nextUser);
       setProfileName(nextUser?.displayName || "");
@@ -96,6 +128,7 @@ export const AuthProvider = ({ children }) => {
       setCurrentScreen(nextUser ? "HOME" : "LOGIN");
       setLoading(false);
     }, () => {
+      observedUid.current = null;
       setUser(null);
       setLoading(false);
       setCurrentScreen("LOGIN");
@@ -109,11 +142,13 @@ export const AuthProvider = ({ children }) => {
     let active = true;
     if (!user?.uid) return;
     const hydrateStoredSession = async () => {
-      const [storedShowBalance, storedTransactions, storedSimulations] =
+      const returnKey = `${storageKeys.permissionReturn}/${user.uid}`;
+      const [storedShowBalance, storedTransactions, storedSimulations, savedReturn] =
         await Promise.all([
           getStoredJson(`${storageKeys.showBalance}/${user.uid}`, null),
           getStoredJson(`${storageKeys.transactions}/${user.uid}`, null),
           loadSimulatedPayments(user.uid).catch(() => []),
+          getStoredJson(returnKey),
         ]);
       if (!active) return;
 
@@ -125,6 +160,15 @@ export const AuthProvider = ({ children }) => {
         setTransactions(storedTransactions);
       }
       setSimulationHistory({ uid: user.uid, payments: storedSimulations });
+      if (savedReturn != null) {
+        removeStoredValue(returnKey);
+        const resume = typeof savedReturn === "number"
+          ? { screen: "REMINDERS", expiresAt: savedReturn }
+          : savedReturn;
+        if (resumableScreens.has(resume?.screen) && Number.isFinite(resume.expiresAt) && resume.expiresAt > Date.now()) {
+          setCurrentScreen((screen) => screen === "HOME" ? resume.screen : screen);
+        }
+      }
 
       setIsStorageReady(true);
     };
@@ -186,6 +230,7 @@ export const AuthProvider = ({ children }) => {
     lockSession();
     try {
       await signOut(auth);
+      observedUid.current = null;
       setUser(null);
       setProfileName("");
       setProfileNotice("");
@@ -226,6 +271,7 @@ export const AuthProvider = ({ children }) => {
       user, loading, login, register, logout, profileNotice,
       resetPassword: requestPasswordReset,
       setCurrentScreen,
+      rememberPermissionScreen,
       ...pinLock,
       userEmail,
       setUserEmail,
@@ -244,6 +290,7 @@ export const AuthProvider = ({ children }) => {
     }),
     [
       currentScreen,
+      rememberPermissionScreen,
       user, loading, login, register, logout, profileNotice,
       pinLock,
       userEmail,

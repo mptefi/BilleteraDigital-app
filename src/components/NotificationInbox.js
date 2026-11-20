@@ -9,8 +9,8 @@ import { COLORS } from "../theme/colors";
 
 const filters = [["all", "Todas"], ...Object.entries(activityCategories).map(([key, value]) => [key, value.label])];
 
-export default function NotificationInbox({ uid, transactions, onOpenHistory }) {
-  const items = useMemo(() => notificationActivity(transactions), [transactions]);
+export default function NotificationInbox({ uid, transactions, promoReceivedAt, onOpenHistory }) {
+  const items = useMemo(() => notificationActivity(transactions, promoReceivedAt), [transactions, promoReceivedAt]);
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState("");
@@ -19,22 +19,23 @@ export default function NotificationInbox({ uid, transactions, onOpenHistory }) 
   const selectedCategory = selected && activityCategories[selected.category];
 
   const handleAction = async () => {
-    const item = selected;
+    if (!selected) return;
     setSelected(null);
     if (isMovement) {
       onOpenHistory();
       return;
     }
     try {
-      const sent = await sendActivityNotification(uid, item);
-      setNotice(sent ? "Aviso de prueba enviado." : "Activa las notificaciones para enviar el aviso.");
+      const sent = await sendActivityNotification(uid, selected);
+      setNotice(sent ? "Aviso enviado." : "Activa las notificaciones para recibir el aviso.");
     } catch {
-      setNotice("No pudimos mostrar el aviso. Intenta nuevamente.");
+      setNotice("No pudimos enviar el aviso. Intenta nuevamente.");
     }
   };
 
   return (
     <>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>Actividad</Text>
       <View style={styles.filters}>
         {filters.map(([key, label]) => (
           <Pressable
@@ -48,17 +49,22 @@ export default function NotificationInbox({ uid, transactions, onOpenHistory }) 
           </Pressable>
         ))}
       </View>
-      <Text accessibilityRole="header" style={styles.sectionTitle}>Actividad</Text>
       {!!notice && <FeatureStatus icon="bell" message={notice} />}
+      {visibleItems.length === 0 && (
+        <FeatureStatus icon="gift" title="Las promociones aparecerán aquí" />
+      )}
       <View style={styles.list}>
         {visibleItems.map((item) => {
           const category = activityCategories[item.category];
+          const isPromo = item.category === "promo";
+          const isPlaceholder = item.example && (item.category === "payment" || item.category === "transfer");
           return (
             <Pressable
               key={item.id}
-              accessibilityRole="button"
+              accessibilityRole={isPlaceholder ? undefined : "button"}
+              disabled={isPlaceholder}
               onPress={() => { setSelected(item); setNotice(""); }}
-              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+              style={({ pressed }) => [styles.card, isPromo && styles.promoCard, pressed && styles.pressed]}
             >
               <View style={[styles.icon, { backgroundColor: category.background }]}>
                 <Feather name={category.icon} size={21} color={category.color} />
@@ -67,9 +73,9 @@ export default function NotificationInbox({ uid, transactions, onOpenHistory }) 
                 <Text style={[styles.category, { color: category.color }]}>{category.label}</Text>
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 <Text style={styles.cardMessage}>{item.message}</Text>
-                <Text style={styles.metadata}>{item.example ? "Ejemplo" : `Simulado · ${item.date}`}</Text>
+                {!!item.date && <Text style={styles.metadata}>{isPromo ? item.date : `Simulado · ${item.date}`}</Text>}
               </View>
-              <Feather name="chevron-right" size={17} color={COLORS.textSecondary} />
+              {!isPlaceholder && <Feather name="chevron-right" size={17} color={COLORS.textSecondary} />}
             </Pressable>
           );
         })}
@@ -80,7 +86,7 @@ export default function NotificationInbox({ uid, transactions, onOpenHistory }) 
         iconTone={selectedCategory}
         title={selected?.title}
         message={selected?.message}
-        primaryLabel={isMovement ? "Ver movimientos" : "Probar aviso"}
+        primaryLabel={isMovement ? "Ver movimientos" : "Recibir aviso"}
         onPrimary={handleAction}
         secondaryLabel="Cerrar"
         onSecondary={() => setSelected(null)}
@@ -89,7 +95,7 @@ export default function NotificationInbox({ uid, transactions, onOpenHistory }) 
         {selectedCategory && (
           <View style={[styles.permissionTag, { backgroundColor: selectedCategory.background }]}>
             <Text style={[styles.permissionTagText, { color: selectedCategory.color }]}>
-              {selectedCategory.label} · {isMovement ? "Simulado" : "Ejemplo"}
+              {selectedCategory.label}
             </Text>
           </View>
         )}
@@ -112,6 +118,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: COLORS.white,
     padding: 14, borderRadius: 18, borderWidth: 1, borderColor: COLORS.border,
   },
+  promoCard: { backgroundColor: "#FCF8FF", borderColor: "#E4D8F1" },
   pressed: { backgroundColor: COLORS.primaryLight },
   icon: { width: 44, height: 44, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   cardCopy: { flex: 1, gap: 3 },

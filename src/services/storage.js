@@ -6,6 +6,8 @@ const STORAGE_KEYS = {
   transactions: "@altoque/transactions",
   simulatedPayments: "@altoque/simulated-payments",
   offers: "@altoque/offers",
+  permissionReturn: "@altoque/notification-return",
+  notificationPreference: "@altoque/notification-preference",
   shakeHistory: "@altoque/shake-history",
   demoReceipt: "@altoque/receipt",
   movementReminder: "@altoque/movement-reminder",

@@ -14,6 +14,8 @@ export default function usePinLock(user) {
   const authorization = useRef(null);
   const readSequence = useRef(0);
   const mounted = useRef(true);
+  const permissionPrompt = useRef(null);
+  const [isRequestingPermission, setRequestingPermission] = useState(false);
   const [isAppActive, setAppActive] = useState(AppState.currentState !== "background" && AppState.currentState !== "inactive");
   const [pinState, setPinState] = useState({ uid: null, status: "loading", hasPin: false, remainingAttempts: MAX_PIN_ATTEMPTS });
   const stateRef = useRef(pinState);
@@ -22,19 +24,63 @@ export default function usePinLock(user) {
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
+  const finishPermissionPrompt = useCallback((prompt) => {
+    if (!prompt || permissionPrompt.current !== prompt) return;
+    permissionPrompt.current = null;
+    clearTimeout(prompt.timeout);
+    if (mounted.current) setRequestingPermission(false);
+    prompt.resume?.();
+  }, []);
+
   const lockSession = useCallback(() => {
+    finishPermissionPrompt(permissionPrompt.current);
     epoch.current += 1;
     authorization.current = null;
     setPinState((previous) => ({ ...previous, status: previous.status === "error" ? "error" : previous.hasPin ? (previous.remainingAttempts === 0 ? "blocked" : "locked") : "missing" }));
-  }, []);
+  }, [finishPermissionPrompt]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
       setAppActive(next === "active");
-      if (next !== "active") lockSession();
+      const prompt = permissionPrompt.current;
+      if (next === "active") {
+        if (prompt?.resume) finishPermissionPrompt(prompt);
+      } else if (!prompt) {
+        lockSession();
+      }
     });
-    return () => subscription.remove();
-  }, [lockSession]);
+    return () => {
+      subscription.remove();
+      finishPermissionPrompt(permissionPrompt.current);
+    };
+  }, [finishPermissionPrompt, lockSession]);
+
+  const runNativePermission = useCallback(async (request) => {
+    if (AppState.currentState !== "active" || stateRef.current.status !== "unlocked" || permissionPrompt.current) {
+      throw new Error("Desbloquea la app antes de solicitar el permiso.");
+    }
+    const prompt = { timeout: null, resume: null };
+    permissionPrompt.current = prompt;
+    setRequestingPermission(true);
+    prompt.timeout = setTimeout(() => {
+      if (AppState.currentState === "active") finishPermissionPrompt(prompt);
+      else lockSession();
+    }, 45_000);
+
+    try {
+      return await request();
+    } finally {
+      if (permissionPrompt.current === prompt && AppState.currentState !== "active") {
+        // Android puede entregar la respuesta antes de volver a marcar la app como activa.
+        clearTimeout(prompt.timeout);
+        await new Promise((resolve) => {
+          prompt.resume = resolve;
+          prompt.timeout = setTimeout(lockSession, 1000);
+        });
+      }
+      finishPermissionPrompt(prompt);
+    }
+  }, [finishPermissionPrompt, lockSession]);
 
   const reloadPin = useCallback(async () => {
     const id = uidRef.current;
@@ -131,6 +177,6 @@ export default function usePinLock(user) {
     } finally { operation.current = false; }
   }, [validSession]);
 
-  return useMemo(() => ({ pinState, isAppActive, lockSession, reloadPin, allowPinSetupAfterRegistration, unlockWithPin, authorizePinReset, setupPin }),
-    [pinState, isAppActive, lockSession, reloadPin, allowPinSetupAfterRegistration, unlockWithPin, authorizePinReset, setupPin]);
+  return useMemo(() => ({ pinState, isAppActive, isRequestingPermission, runNativePermission, lockSession, reloadPin, allowPinSetupAfterRegistration, unlockWithPin, authorizePinReset, setupPin }),
+    [pinState, isAppActive, isRequestingPermission, runNativePermission, lockSession, reloadPin, allowPinSetupAfterRegistration, unlockWithPin, authorizePinReset, setupPin]);
 }

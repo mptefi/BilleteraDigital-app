@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Linking } from "react-native";
+import { AppState } from "react-native";
+import { useAuth } from "../context/AuthContext";
 
 export default function useFeaturePermission(read, request) {
+  const { rememberPermissionScreen, runNativePermission } = useAuth();
   const [permission, setPermission] = useState(null);
+  const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const pending = useRef(false);
@@ -17,10 +20,14 @@ export default function useFeaturePermission(read, request) {
         const result = await read();
         if (active && version === revision.current) {
           setPermission(result);
+          if (result.granted) setAttempted(false);
           setError("");
         }
       } catch {
-        if (active && version === revision.current) setError("No pudimos consultar el permiso.");
+        if (active && version === revision.current) {
+          setPermission(null);
+          setError("No pudimos consultar el permiso.");
+        }
       }
     };
     refresh();
@@ -40,18 +47,28 @@ export default function useFeaturePermission(read, request) {
     setBusy(true);
     setError("");
     try {
-      if (permission?.canAskAgain === false) {
-        await Linking.openSettings();
-      } else {
-        setPermission(await request());
+      const current = await read();
+      setPermission(current);
+      if (current.granted) {
+        setAttempted(false);
+        return true;
       }
+      await rememberPermissionScreen();
+      const result = await runNativePermission(request);
+      const latest = await read().catch(() => result);
+      setPermission(latest);
+      const alreadyBlocked = current.canAskAgain === false && latest.canAskAgain === false;
+      setAttempted(!latest.granted && !alreadyBlocked);
+      return latest.granted;
     } catch {
-      setError("No pudimos abrir la solicitud de permiso o los Ajustes.");
+      setError("No pudimos solicitar el permiso.");
+      return false;
     } finally {
       pending.current = false;
       setBusy(false);
     }
-  }, [permission, request]);
+  }, [read, rememberPermissionScreen, request, runNativePermission]);
 
-  return { permission, busy, allow, error };
+  const denied = attempted && !busy && !error && permission?.granted === false;
+  return { permission, busy, allow, error, denied };
 }

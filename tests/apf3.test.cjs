@@ -113,22 +113,26 @@ test("Android prepara el canal y solicita el permiso de avisos con opciones nati
   assert.deepEqual(calls, ["movements", "request"]);
   assert.equal((await requestReminderPermission()).granted, true);
   assert.deepEqual(calls, ["movements", "request"]);
+  current = { granted: false, canAskAgain: false };
+  assert.equal((await requestReminderPermission()).canAskAgain, false);
+  assert.deepEqual(calls, ["movements", "request"]);
 });
 
 test("Expo Go usa el canal predeterminado para activar, enviar y programar avisos", async () => {
   let granted = false;
+  const preferences = new Map();
   const requests = [];
   const read = async () => ({ granted, canAskAgain: true });
-  const { requestReminderPermission, sendActivityNotification, scheduleReminder } = load("src/services/reminders.js", {
+  const { requestReminderPermission, sendActivityNotification, scheduleReminder, setNotificationPreference } = load("src/services/reminders.js", {
     "react-native": { Platform: { OS: "android" } },
     expo: { isRunningInExpoGo: () => true },
     "expo-constants": {},
     "expo-device": {},
     "./storage": {
-      storageKeys: { movementReminder: "reminder" },
-      getStoredJson: async () => null,
+      storageKeys: { movementReminder: "reminder", notificationPreference: "notifications" },
+      getStoredJson: async (key) => preferences.get(key),
       removeStoredValue: async () => true,
-      setStoredJson: async () => true,
+      setStoredJson: async (key, value) => Boolean(preferences.set(key, value)),
     },
     "./notificationActivity": load("src/services/notificationActivity.js"),
     "expo-notifications": {
@@ -141,11 +145,53 @@ test("Expo Go usa el canal predeterminado para activar, enviar y programar aviso
     },
   });
   assert.equal((await requestReminderPermission()).granted, true);
+  assert.equal(await sendActivityNotification("A", { category: "payment", title: "Pago" }), false);
+  await setNotificationPreference("A", true);
   assert.equal(await sendActivityNotification("A", { category: "payment", title: "Pago" }), true);
+  assert.equal(await sendActivityNotification("B", { category: "payment", title: "Pago" }), false);
   assert.equal(requests[0].trigger, null);
   await scheduleReminder("A", 5);
   assert.equal(requests[1].trigger.seconds, 5);
   assert.equal(Object.hasOwn(requests[1].trigger, "channelId"), false);
+});
+
+test("Expo Go consulta a Android y puede reintentar tras un resultado de bloqueo anterior", async () => {
+  let allowed = false;
+  let requests = 0;
+  let nativeResult = { granted: false, canAskAgain: false, status: "denied" };
+  const { readReminderPermission, requestReminderPermission } = load("src/services/reminders.js", {
+    "react-native": {
+      Platform: { OS: "android", Version: 36 },
+      PermissionsAndroid: {
+        PERMISSIONS: { POST_NOTIFICATIONS: "notifications" },
+        check: async () => allowed,
+      },
+    },
+    expo: { isRunningInExpoGo: () => true },
+    "expo-constants": {},
+    "expo-device": {},
+    "./storage": {},
+    "./notificationActivity": {},
+    "expo-notifications": {
+      setNotificationHandler() {},
+      getPermissionsAsync: async () => ({ granted: false, canAskAgain: false, status: "denied" }),
+      requestPermissionsAsync: async () => {
+        requests++;
+        allowed = nativeResult.granted;
+        return nativeResult;
+      },
+    },
+  });
+  assert.equal((await readReminderPermission()).canAskAgain, undefined);
+  assert.equal(requests, 0);
+  assert.equal((await requestReminderPermission()).canAskAgain, false);
+  assert.equal(requests, 1);
+  assert.equal((await readReminderPermission()).canAskAgain, undefined);
+  nativeResult = { granted: true, canAskAgain: true, status: "granted" };
+  assert.equal((await requestReminderPermission()).granted, true);
+  assert.equal((await readReminderPermission()).granted, true);
+  assert.equal((await requestReminderPermission()).granted, true);
+  assert.equal(requests, 2);
 });
 
 test("pantalla QR rechaza datos inválidos, evita lecturas duplicadas y confirma la simulación", async () => {
@@ -256,7 +302,9 @@ test("la cámara solicita el permiso desde el modal y permite descartarlo", asyn
   assert.equal(requests, 0);
   await act(async () => root.update(screen(false)));
   await act(async () => open());
-  assert.equal(modal().primaryLabel, "Abrir Ajustes");
+  assert.equal(root.root.findByType("Button").props.label, "Permitir cámara");
+  assert.equal(modal().primaryLabel, "Permitir");
+  assert.equal(modal().secondaryLabel, "Ahora no");
   await act(async () => modal().onPrimary());
   assert.equal(requests, 1);
   await act(async () => root.unmount());
@@ -288,18 +336,166 @@ test("dos pagos simultáneos respetan el saldo; USD conserva el saldo en soles",
 test("la bandeja muestra las cuatro categorías y reemplaza ejemplos con movimientos confirmados", () => {
   const { notificationActivity } = load("src/services/notificationActivity.js");
   const examples = notificationActivity([]);
-  assert.equal(examples.length, 4);
+  assert.equal(examples.length, 3);
   assert.ok(examples.every((item) => item.example));
   const activities = notificationActivity([
     { id: "credit", type: "income", simulation: true, title: "María Demo", amount: "+ S/ 12.50", date: "Hoy" },
     { id: "debit", type: "expense", simulation: true, title: "Cafetería Demo", amount: "- S/ 12.50", date: "Hoy" },
     { id: "previous", type: "expense" },
-  ]);
+  ], Date.UTC(2026, 10, 20, 14));
   assert.equal(activities.length, 4);
   assert.equal(activities[0].category, "transfer");
   assert.equal(activities[1].category, "payment");
-  assert.ok(activities.some((item) => item.category === "promo" && item.example));
+  assert.ok(activities.some((item) => item.category === "promo" && item.example && item.title.includes("Bembos")));
+  assert.equal(activities.filter((item) => item.category === "payment" || item.category === "transfer").length, 2);
   assert.ok(activities.some((item) => item.category === "security" && item.example));
+});
+
+test("la bandeja y la promo esperan el permiso y el rechazo conserva Notificaciones", async () => {
+  const saved = new Map();
+  const timers = new Map();
+  const sent = [];
+  let devicePermission = { granted: false, status: "denied", canAskAgain: true };
+  let nextPermission = { ...devicePermission };
+  let requests = 0;
+  let wentBack = 0;
+  let timerId = 0;
+  let onAppStateChange;
+  const { readReminderPermission, requestReminderPermission } = load("src/services/reminders.js", {
+    "react-native": { Platform: { OS: "android" } },
+    expo: { isRunningInExpoGo: () => false },
+    "expo-constants": {},
+    "expo-device": {},
+    "./storage": {},
+    "./notificationActivity": {},
+    "expo-notifications": {
+      setNotificationHandler() {},
+      AndroidImportance: { HIGH: 4 },
+      setNotificationChannelAsync: async () => {},
+      getPermissionsAsync: async () => devicePermission,
+      requestPermissionsAsync: async () => {
+        requests++;
+        devicePermission = nextPermission;
+        return devicePermission;
+      },
+    },
+  });
+  const { default: FeaturePermission } = load("src/components/FeaturePermission.js", {
+    "react-native": { View: "View" },
+    "./AppModal": (props) => props.visible ? React.createElement("Modal", props) : null,
+    "./FeatureScreen": { FeatureButton: "Button", FeatureStatus: "Status", featureStyles: {} },
+  });
+  const useAuth = () => ({
+    transactions: [],
+    rememberPermissionScreen: async () => {},
+    runNativePermission: (request) => request(),
+  });
+  const { default: useFeaturePermission } = load("src/hooks/useFeaturePermission.js", {
+    "react-native": { AppState: { addEventListener: (_, listener) => {
+      onAppStateChange = listener;
+      return { remove() {} };
+    } } },
+    "../context/AuthContext": { useAuth },
+  });
+  const { default: RemindersScreen } = load("src/screens/RemindersScreen.js", {
+    "react-native": {
+      StyleSheet: { create: (styles) => styles }, View: "View", Pressable: "Pressable", Text: "Text", ActivityIndicator: "Spinner",
+      AppState: { addEventListener: () => ({ remove() {} }) },
+    },
+    "@expo/vector-icons": { Feather: "Icon" },
+    "expo-notifications": { addNotificationReceivedListener: () => ({ remove() {} }) },
+    "../components/FeatureScreen": { default: "Screen", __esModule: true, FeatureButton: "Button", FeatureStatus: "Status", featureStyles: {} },
+    "../components/FeaturePermission": FeaturePermission,
+    "../components/NotificationInbox": "Inbox",
+    "../context/AuthContext": { useAuth },
+    "../hooks/useFeaturePermission": useFeaturePermission,
+    "../theme/colors": { COLORS: {} },
+    "../services/notificationActivity": load("src/services/notificationActivity.js"),
+    "../services/storage": {
+      storageKeys: { offers: "offers" },
+      getStoredJson: async (key) => saved.get(key),
+      setStoredJson: async (key, value) => { saved.set(key, value); return true; },
+    },
+    "../services/reminders": {
+      remindersSupported: true,
+      findReminder: async () => null,
+      readReminderPermission,
+      requestReminderPermission,
+      readNotificationPreference: async (uid) => saved.get(`notification/${uid}`) === true,
+      setNotificationPreference: async (uid, enabled) => Boolean(saved.set(`notification/${uid}`, enabled)),
+      sendActivityNotification: async (uid, item) => { sent.push([uid, item]); },
+    },
+  }, {
+    setTimeout: (callback) => { timers.set(++timerId, callback); return timerId; },
+    clearTimeout: (id) => timers.delete(id),
+  });
+  let root;
+  const open = () => act(async () => {
+    root = create(React.createElement(RemindersScreen, { uid: "A", onBack: () => { wentBack++; } }));
+  });
+  const openPermissionModal = () => act(async () => root.root.findByType("Button").props.onPress());
+  const confirmPermission = () => act(async () => root.root.findByType("Modal").props.onPrimary());
+  await open();
+  assert.equal(root.root.findAllByType("Inbox").length, 0);
+  assert.equal(timers.size, 0);
+  assert.equal(root.root.findByType("Status").props.title, "Recibe tus avisos");
+  assert.equal(root.root.findByType("Button").props.label, "Permitir notificaciones");
+  assert.equal(root.root.findAllByType("Status").length, 1);
+  assert.equal(root.root.findAllByType("Modal").length, 0);
+  await openPermissionModal();
+  assert.equal(root.root.findByType("Modal").props.primaryLabel, "Permitir");
+  assert.equal(requests, 0);
+  await act(async () => root.root.findByType("Modal").props.onSecondary());
+  assert.equal(root.root.findAllByType("Modal").length, 0);
+  assert.equal(requests, 0);
+  await openPermissionModal();
+  await confirmPermission();
+  assert.equal(requests, 1);
+  assert.equal(root.root.findAllByType("Modal").length, 0);
+  assert.equal(wentBack, 0);
+  assert.equal(root.root.findAllByType("Status").length, 1);
+  assert.equal(root.root.findByType("Button").props.disabled, false);
+  assert.equal(root.root.findAllByType("Inbox").length, 0);
+  assert.equal(timers.size, 0);
+  nextPermission = { granted: true, status: "granted", canAskAgain: true };
+  await openPermissionModal();
+  await confirmPermission();
+  assert.equal(requests, 2);
+  await act(async () => [...timers.values()][0]());
+  assert.equal(root.root.findByType("Inbox").props.promoReceivedAt, saved.get("offers/A/bembos"));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0][1].title, /Bembos/);
+  await act(async () => root.unmount());
+  await open();
+  assert.equal(root.root.findByType("Inbox").props.promoReceivedAt, saved.get("offers/A/bembos"));
+  assert.equal(timers.size, 0);
+  await act(async () => root.root.findByType("Pressable").props.onPress());
+  const disable = root.root.findAllByType("Button").find((button) => button.props.label === "Desactivar avisos de Al Toque");
+  await act(async () => disable.props.onPress());
+  assert.equal(root.root.findAllByType("Inbox").length, 0);
+  assert.equal(devicePermission.granted, true);
+  await openPermissionModal();
+  await confirmPermission();
+  assert.equal(requests, 2);
+  assert.equal(root.root.findAllByType("Inbox").length, 1);
+  await act(async () => root.unmount());
+  devicePermission = { granted: false, status: "denied", canAskAgain: false };
+  nextPermission = devicePermission;
+  await open();
+  assert.equal(root.root.findAllByType("Inbox").length, 0);
+  assert.equal(root.root.findByType("Button").props.label, "Permitir notificaciones");
+  assert.equal(root.root.findAllByType("Status").length, 1);
+  assert.equal(root.root.findAllByType("Pressable").length, 0);
+  assert.match(root.root.findByType("Text").props.children, /El sistema ya no permite/);
+  await openPermissionModal();
+  await confirmPermission();
+  assert.equal(requests, 2);
+  assert.equal(root.root.findAllByType("Modal").length, 0);
+  assert.equal(root.root.findAllByType("Inbox").length, 0);
+  devicePermission = { granted: true, status: "granted", canAskAgain: true };
+  await act(async () => onAppStateChange("active"));
+  assert.equal(root.root.findAllByType("Inbox").length, 1);
+  await act(async () => root.unmount());
 });
 
 test("los avisos locales respetan el permiso, usan el canal correcto y ocultan el importe", async () => {
@@ -311,7 +507,7 @@ test("los avisos locales respetan el permiso, usan el canal correcto y ocultan e
     expo: { isRunningInExpoGo: () => false },
     "expo-constants": {},
     "expo-device": {},
-    "./storage": {},
+    "./storage": { storageKeys: { notificationPreference: "notifications" }, getStoredJson: async () => true },
     "./notificationActivity": load("src/services/notificationActivity.js"),
     "expo-notifications": {
       setNotificationHandler() {},
@@ -452,7 +648,7 @@ test("recordatorio crea el canal y reemplaza o cancela solo la programación de 
   const stored = new Map();
   let sequence = 0;
   let channel;
-  const { scheduleReminder, findReminder, cancelReminder } = load("src/services/reminders.js", {
+  const { scheduleReminder, findReminder, setNotificationPreference } = load("src/services/reminders.js", {
     "react-native": { Platform: { OS: "android" } },
     expo: { isRunningInExpoGo: () => false },
     "expo-constants": {},
@@ -472,7 +668,7 @@ test("recordatorio crea el canal y reemplaza o cancela solo la programación de 
       cancelScheduledNotificationAsync: async (id) => { scheduled.delete(id); },
     },
     "./storage": {
-      storageKeys: { movementReminder: "reminders" },
+      storageKeys: { movementReminder: "reminders", notificationPreference: "notifications" },
       getStoredJson: async (key) => stored.get(key),
       setStoredJson: async (key, value) => Boolean(stored.set(key, value)),
       removeStoredValue: async (key) => { stored.delete(key); return true; },
@@ -486,41 +682,63 @@ test("recordatorio crea el canal y reemplaza o cancela solo la programación de 
   assert.equal(scheduled.get(demo).trigger.seconds, 5);
   assert.equal(scheduled.get(demo).content.data.uid, "A");
   assert.equal(await findReminder("A"), demo);
-  await cancelReminder("A");
+  await setNotificationPreference("A", false);
+  assert.equal(stored.get("notifications/A"), false);
   assert.equal(await findReminder("A"), null);
   assert.equal(scheduled.has(demo), false);
   assert.equal(await findReminder("B"), other);
 });
 
-test("permiso denegado permite reintentar, abre Ajustes y vuelve a consultar al regresar", async () => {
+test("un permiso denegado vuelve a solicitarse por el mismo flujo y se consulta al regresar", async () => {
   let response = { granted: false, status: "denied", canAskAgain: true };
-  let openedSettings = 0;
   let requests = 0;
   let resume;
   let access;
+  const events = [];
   const read = async () => response;
   const request = async () => {
+    events.push("request");
     requests++;
     response = { ...response, canAskAgain: false };
     return response;
   };
   const { default: useFeaturePermission } = load("src/hooks/useFeaturePermission.js", {
+    "../context/AuthContext": {
+      useAuth: () => ({
+        rememberPermissionScreen: async () => { events.push("remember"); },
+        runNativePermission: async (requestPermission) => requestPermission(),
+      }),
+    },
     "react-native": {
       AppState: { addEventListener: (_, handler) => { resume = handler; return { remove() {} }; } },
-      Linking: { openSettings: async () => { openedSettings++; } },
     },
   });
   function Probe() { access = useFeaturePermission(read, request); return null; }
   let root;
   await act(async () => { root = create(React.createElement(Probe)); });
   assert.equal(access.permission.canAskAgain, true);
+  assert.equal(access.denied, false);
   await act(async () => access.allow());
   assert.equal(requests, 1);
   assert.equal(access.permission.canAskAgain, false);
+  assert.equal(access.denied, true);
+  await act(async () => root.unmount());
+  await act(async () => { root = create(React.createElement(Probe)); });
+  assert.equal(access.denied, false);
   await act(async () => access.allow());
-  assert.equal(openedSettings, 1);
+  assert.equal(requests, 2);
+  assert.equal(access.denied, false);
+  assert.deepEqual(events, ["remember", "request", "remember", "request"]);
+  response = { granted: true, status: "granted", canAskAgain: true };
+  await act(async () => access.allow());
+  assert.equal(access.permission.granted, true);
+  assert.equal(requests, 2);
+  response = { granted: false, status: "denied", canAskAgain: false };
+  await act(async () => resume("active"));
+  assert.equal(access.denied, false);
   response = { granted: true, status: "granted", canAskAgain: true };
   await act(async () => resume("active"));
   assert.equal(access.permission.granted, true);
+  assert.equal(access.denied, false);
   await act(async () => root.unmount());
 });

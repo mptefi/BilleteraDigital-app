@@ -6,14 +6,16 @@ El inventario de pantallas, archivos y conceptos del curso está en la [document
 
 ## Ejecutar la demo
 
-Requiere Node.js 22.13 o posterior dentro de la versión 22, npm y [Expo Go compatible con SDK 58](https://expo.dev/go?sdkVersion=58&platform=android&device=true). Desde la carpeta del repositorio, instala las dependencias y abre el proyecto.
+Requiere Node.js 22.13 o posterior dentro de la versión 22, npm y un dispositivo o emulador Android. Desde PowerShell, instala las dependencias y compila el development build de Al Toque la primera vez o cuando cambie la configuración nativa.
 
-```sh
+```powershell
 npm ci
-npm start
+Remove-Item Env:EXPO_PUBLIC_ALTOQUE_QR_PRESENTATION -ErrorAction SilentlyContinue
+npx expo run:android --no-bundler
+npm start -- --android
 ```
 
-Conecta el teléfono y la laptop a la misma red. Escanea el QR de la terminal con Expo Go e inicia sesión con una cuenta de Al Toque. Metro sirve tanto el proyecto como la ruta de validación de QR. El primer arranque instala las dependencias de Firebase Admin si faltan. Para una red que aísla los dispositivos, usa `npm start -- --tunnel`. El inicio de sesión y la validación de tokens requieren internet.
+Si ya tienes instalado el development build de `com.altoque.wallet` con SDK 58, inicia con `npm start -- --android`. Esa app permite probar el diálogo de notificaciones de Al Toque en Android 13 o superior. Metro sirve tanto el proyecto como la ruta de validación de QR. El primer arranque instala las dependencias de Firebase Admin si faltan. Para una red que aísla los dispositivos, usa `npm start -- --tunnel`. El inicio de sesión y la validación de tokens requieren internet.
 
 ### Pruebas con Firebase Emulator Suite
 
@@ -66,9 +68,10 @@ Deja `npm run api:local` abierto mientras usas el escáner. Si desconectas el An
 - **QR**. Inicio → QR. Escanea el código, revisa el importe y elige Confirmar simulación o Cancelar. Firebase Auth entrega un ID token al cliente y Axios lo envía como `Authorization: Bearer` a `POST /api/qr/validate`. Functions usa Firebase Admin para verificar el token y obtener el UID de la sesión. Responde con `200` si valida, `400` si los datos son inválidos, `401` si falta el token o es inválido y `500` ante un error interno. Al confirmar, el movimiento se guarda como **Simulado**. Los pagos restan del saldo simulado en soles y las transferencias recibidas suman. El saldo inicial por cuenta es **S/ 1,840.50** y los cambios se recuperan al reabrir la app. [Verificación de ID tokens con Firebase Admin](https://firebase.google.com/docs/auth/admin/verify-id-tokens)
 - **Comprobante**. Movimientos → Transferencia de prueba → Comprobante. Abre la cámara, toma una foto, repítela o guárdala. Se copia a `Paths.document` y AsyncStorage conserva el nombre del archivo asociado al UID y al movimiento de prueba. Vuelve a desbloquear tras reiniciar y abre el mismo movimiento para recuperar la foto. [Expo Camera SDK 58](https://docs.expo.dev/versions/v58.0.0/sdk/camera/) · [Expo FileSystem SDK 58](https://docs.expo.dev/versions/v58.0.0/sdk/filesystem/)
 - **Acelerómetro**. Movimientos → Agitar para ver mis movimientos. El ajuste empieza apagado y se guarda por cuenta. Vuelve a Inicio para probarlo. El sensor se consulta cada 100 ms y abre el historial a partir de 1,8 g, con un intervalo de 1,6 s entre activaciones. La suscripción se elimina al salir de Inicio o al bloquear o enviar la app al segundo plano. El acceso manual siempre está en la barra inferior y en Ver todo. [Expo Accelerometer SDK 58](https://docs.expo.dev/versions/v58.0.0/sdk/accelerometer/)
-- **Notificaciones**. Inicio → campana. El modal de Al Toque explica los avisos antes de pedir el permiso del sistema. Al concederlo, se abre la bandeja con filtros de **Pagos, Transferencias, Promos y Seguridad**. Los pagos y transferencias QR confirmados generan avisos locales y aparecen en la actividad de esa cuenta. Los ejemplos de promos y seguridad se pueden enviar al dispositivo desde **Probar aviso**. La bandeja del sistema muestra el tipo de aviso y reserva los detalles para la app.
+- **Notificaciones**. Inicio → campana. Al activar los avisos y conceder el permiso del sistema, se abre la bandeja con filtros de **Pagos, Transferencias, Promos y Seguridad**. Los pagos y transferencias QR confirmados generan avisos locales y aparecen en la actividad de esa cuenta. Los avisos de promos y seguridad se pueden enviar desde **Recibir aviso**. La bandeja del sistema muestra el tipo de aviso y reserva los detalles para la app.
+- **Activación de avisos**. La activación se guarda por cuenta en Al Toque. Si Expo Go ya tiene permiso del sistema, el modal de Al Toque activa los avisos directamente. Para repetir la activación, usa **Notificaciones → Recordatorios y pruebas → Desactivar avisos de Al Toque**.
 - **Recordatorios**. En Notificaciones, abre **Recordatorios y pruebas** para programar un aviso para dentro de 24 horas o probarlo en 5 segundos. Una nueva programación reemplaza la anterior para esa cuenta. En Android, Expo Go usa su canal predeterminado y el development build usa el canal `movements`. Al tocar el aviso se abre el historial después del PIN si la app está bloqueada.
-- **Permisos**. Cada función explica el motivo antes de solicitar acceso. Si se rechaza, muestra el botón para reintentar o abrir Ajustes según el estado. Al volver, desbloquea la app si se solicita y la pantalla consulta de nuevo el permiso. El development build solicita cámara para leer QR y tomar fotos, y solicita notificaciones desde el modal de activación. En Android 12 o posterior, el disparo exacto depende del acceso especial a alarmas del sistema. Si está desactivado, Android puede retrasar la prueba de 5 segundos. [Permisos de Expo Notifications](https://docs.expo.dev/versions/v58.0.0/sdk/notifications/#permissions)
+- **Permisos**. Cámara y notificaciones usan una tarjeta con la explicación y un modal con **Permitir** y **Ahora no**. Al confirmar, Expo solicita el permiso del sistema y la pantalla consulta el resultado. En Android 12 o posterior, el disparo exacto depende del acceso especial a alarmas del sistema. Si está desactivado, Android puede retrasar la prueba de 5 segundos. [Permisos de Expo Notifications](https://docs.expo.dev/versions/v58.0.0/sdk/notifications/#permissions)
 
 | Capa | Archivos principales |
 | --- | --- |
@@ -82,7 +85,7 @@ El PIN sigue protegiendo el acceso local. El APF2 mantiene Firebase Auth y su re
 
 ## QR para exposición
 
-En la laptop de la exposición, abre el proyecto con `npm start` y deja la terminal abierta mientras lo usas en Expo Go.
+En la laptop de la exposición, puedes iniciar Metro con `npm start -- --go` y escanear el QR de la terminal con [Expo Go compatible con SDK 58](https://expo.dev/go?sdkVersion=58&platform=android&device=true). Deja la terminal abierta durante la demo.
 
 Abre estas imágenes desde otro dispositivo o imprímelas. El valor codificado es JSON UTF-8 de hasta 512 caracteres. Usa `type: "altoque.demo"`, `v: 1`, destinatario de 2 a 60 caracteres, monto entero de 1 a 100000 centavos y moneda `PEN` o `USD`.
 
@@ -104,6 +107,7 @@ El campo opcional `direction` admite `debit` para un pago y `credit` para una tr
 4. Escanea de nuevo el QR válido y pulsa **Confirmar simulación** dos veces seguidas. Debe aparecer un solo comprobante con número de operación, fecha de Lima e importe.
 5. Vuelve a Inicio y comprueba que el **Saldo simulado** pasó de **S/ 1,840.50** a **S/ 1,828.00** si partiste del saldo inicial. En Movimientos debe aparecer una sola fila **Simulado** por **− S/ 12.50**.
 6. Escanea `assets/apf3/qr-transferencia.png` y confirma la transferencia recibida de **María Demo**. El saldo vuelve a **S/ 1,840.50** y Movimientos muestra **+ S/ 12.50**. Cierra y reabre la app para comprobar que se conservan el saldo y ambas operaciones.
+7. En **Inicio → campana → Actividad**, comprueba que **Pagos** muestre **Cafetería Demo · − S/ 12.50** y **Transferencias** muestre **María Demo · + S/ 12.50**. Si activaste las notificaciones antes de confirmar, revisa también los avisos de ambas operaciones en la bandeja de Android.
 
 ## Prueba push remota
 

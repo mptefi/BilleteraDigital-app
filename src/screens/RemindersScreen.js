@@ -3,17 +3,17 @@ import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from "
 import { Feather } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 import FeatureScreen, { FeatureButton, FeatureStatus, featureStyles } from "../components/FeatureScreen";
+import FeaturePermission from "../components/FeaturePermission";
 import NotificationInbox from "../components/NotificationInbox";
-import AppModal from "../components/AppModal";
 import { useAuth } from "../context/AuthContext";
 import useFeaturePermission from "../hooks/useFeaturePermission";
 import { COLORS } from "../theme/colors";
+import { demoPromoActivity } from "../services/notificationActivity";
+import { getStoredJson, setStoredJson, storageKeys } from "../services/storage";
 import {
-  cancelReminder, findReminder, getDemoPushToken, readReminderPermission, remindersSupported,
-  requestReminderPermission, scheduleReminder,
+  cancelReminder, findReminder, getDemoPushToken, readNotificationPreference, readReminderPermission,
+  remindersSupported, requestReminderPermission, scheduleReminder, sendActivityNotification, setNotificationPreference,
 } from "../services/reminders";
-
-const promptedAccounts = new Set();
 
 export default function RemindersScreen({ uid, onBack, onOpenHistory }) {
   return (
@@ -28,50 +28,61 @@ export default function RemindersScreen({ uid, onBack, onOpenHistory }) {
 function NotificationCenter({ uid, onOpenHistory }) {
   const { transactions } = useAuth();
   const access = useFeaturePermission(readReminderPermission, requestReminderPermission);
-  const [permissionModal, setPermissionModal] = useState(false);
   const [toolsVisible, setToolsVisible] = useState(false);
+  const [enabled, setEnabled] = useState(null);
+  const [preferenceBusy, setPreferenceBusy] = useState(false);
+  const [preferenceError, setPreferenceError] = useState("");
   const granted = access.permission?.granted;
-  const needsSettings = access.permission?.canAskAgain === false;
+  const blocked = granted === false && access.permission.canAskAgain === false;
+  const promoReceivedAt = useDemoPromo(uid, granted && enabled);
 
   useEffect(() => {
-    if (!access.permission || granted || promptedAccounts.has(uid)) return;
-    promptedAccounts.add(uid);
-    setPermissionModal(true);
-  }, [access.permission, granted, uid]);
+    let mounted = true;
+    readNotificationPreference(uid).then((saved) => {
+      if (mounted) setEnabled(saved);
+    });
+    return () => { mounted = false; };
+  }, [uid]);
 
-  if (!access.permission && !access.error) {
+  const changePreference = async (next) => {
+    setPreferenceBusy(true);
+    setPreferenceError("");
+    try {
+      if (next && !(await access.allow())) return;
+      if (!(await setNotificationPreference(uid, next))) throw new Error();
+      setEnabled(next);
+      if (!next) setToolsVisible(false);
+    } catch {
+      setPreferenceError(next ? "No pudimos activar tus avisos." : "No pudimos desactivar tus avisos.");
+    } finally {
+      setPreferenceBusy(false);
+    }
+  };
+
+  if (enabled === null || (!access.permission && !access.error)) {
     return <FeatureStatus title="Preparando tus avisos" loadingLabel="Consultando el permiso de notificaciones" />;
   }
 
-  if (!granted) {
+  if (!granted || !enabled) {
+    const feedback = access.error || preferenceError || (blocked && "El sistema ya no permite volver a solicitar este permiso.");
     return (
-      <View style={featureStyles.card}>
-        <FeatureStatus icon="bell" title="Recibe tus avisos" message="Entérate de los pagos, transferencias, promos y alertas de seguridad." />
-        {!!access.error && <FeatureStatus icon="alert-circle" tone="error" message={access.error} />}
-        <FeatureButton icon="bell" label="Activar notificaciones" onPress={() => setPermissionModal(true)} disabled={access.busy} />
-        <AppModal
-          visible={permissionModal}
+      <>
+        <FeaturePermission
+          value={{ busy: access.busy || preferenceBusy, allow: () => changePreference(true) }}
           icon="bell"
-          title="Activa tus notificaciones"
-          message={needsSettings
-            ? "En Ajustes puedes activar los avisos de Al Toque."
-            : "Recibe un aviso cuando haya novedades en tu cuenta."}
-          primaryLabel={needsSettings ? "Abrir Ajustes" : "Permitir"}
-          secondaryLabel="Ahora no"
-          onPrimary={async () => {
-            await access.allow();
-            setPermissionModal(false);
-          }}
-          onSecondary={() => setPermissionModal(false)}
-          onClose={() => setPermissionModal(false)}
+          title="Recibe tus avisos"
+          reason="Entérate de los pagos, transferencias, promos y alertas de seguridad."
+          buttonLabel="Permitir notificaciones"
+          dialogTitle="Permite las notificaciones"
         />
-      </View>
+        {!!feedback && <Text accessibilityLiveRegion="polite" style={styles.permissionNote}>{feedback}</Text>}
+      </>
     );
   }
 
   return (
     <>
-      <NotificationInbox uid={uid} transactions={transactions} onOpenHistory={onOpenHistory} />
+      <NotificationInbox uid={uid} transactions={transactions} promoReceivedAt={promoReceivedAt} onOpenHistory={onOpenHistory} />
       <View style={styles.tools}>
         <Pressable
           accessibilityRole="button"
@@ -84,9 +95,43 @@ function NotificationCenter({ uid, onOpenHistory }) {
           <Feather name={toolsVisible ? "chevron-up" : "chevron-down"} size={18} color={COLORS.textSecondary} />
         </Pressable>
         {toolsVisible && <ReminderControls uid={uid} />}
+        {toolsVisible && (
+          <FeatureButton secondary label="Desactivar avisos de Al Toque" disabled={preferenceBusy} onPress={() => changePreference(false)} />
+        )}
+        {!!preferenceError && <FeatureStatus icon="alert-circle" tone="error" message={preferenceError} />}
       </View>
     </>
   );
+}
+
+function useDemoPromo(uid, ready) {
+  const [receivedAt, setReceivedAt] = useState(null);
+  const key = `${storageKeys.offers}/${uid}/bembos`;
+
+  useEffect(() => {
+    if (!ready) return;
+    let mounted = true;
+    let timer;
+    getStoredJson(key).then((saved) => {
+      if (!mounted) return;
+      if (typeof saved === "number" && Number.isFinite(saved) && saved > 0) {
+        setReceivedAt(saved);
+      } else {
+        timer = setTimeout(async () => {
+          const now = Date.now();
+          if (!(await setStoredJson(key, now)) || !mounted) return;
+          setReceivedAt(now);
+          sendActivityNotification(uid, demoPromoActivity(now)).catch(() => {});
+        }, 3500);
+      }
+    });
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
+  }, [key, ready, uid]);
+
+  return receivedAt;
 }
 
 function ReminderControls({ uid }) {
@@ -171,6 +216,7 @@ function ReminderControls({ uid }) {
 }
 
 const styles = StyleSheet.create({
+  permissionNote: { color: COLORS.textSecondary, fontSize: 14, lineHeight: 20 },
   toolIcon: {
     width: 40, height: 40, borderRadius: 14, backgroundColor: "#FFF0DF",
     alignItems: "center", justifyContent: "center",

@@ -18,8 +18,12 @@ const env = {
   EXPO_NO_DOTENV: "1",
   EXPO_PUBLIC_ALTOQUE_METRO_API: "1",
 };
+const startArgs = process.argv.slice(2);
+if (!startArgs.includes("--go") && !startArgs.includes("--dev-client")) {
+  startArgs.unshift("--dev-client");
+}
 const expo = spawnSync(process.execPath, [
-  require.resolve("expo/bin/cli"), "start", "--go", ...process.argv.slice(2),
+  require.resolve("expo/bin/cli"), "start", ...startArgs,
 ], { env, stdio: "inherit" });
 if (expo.error) throw expo.error;
 process.exitCode = expo.status ?? (expo.signal === "SIGINT" ? 0 : 1);

@@ -1,26 +1,53 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { View } from "react-native";
 import AppModal from "./AppModal";
 import { FeatureButton, FeatureStatus, featureStyles } from "./FeatureScreen";
 
-export default function FeaturePermission({ value, reason }) {
+export default function FeaturePermission({
+  value,
+  reason,
+  icon = "camera",
+  title = "Acceso a la cámara",
+  buttonLabel = "Permitir cámara",
+  dialogTitle = "Permite el acceso a la cámara",
+  deniedMessage = "No se otorgó el permiso de cámara.",
+  blockedMessage,
+  onOpenSettings,
+}) {
   const [visible, setVisible] = useState(false);
-  const { permission, busy, allow, error } = value;
-  const needsSettings = permission?.canAskAgain === false;
+  const confirming = useRef(false);
+  const { busy, allow, error, denied } = value;
   const close = () => setVisible(false);
   return (
     <View style={featureStyles.card}>
-      <FeatureStatus icon="camera" title="Acceso a la cámara" message={reason} />
+      <FeatureStatus icon={icon} title={title} message={reason} />
+      {onOpenSettings
+        ? <FeatureStatus icon="info" message={blockedMessage} />
+        : denied && <FeatureStatus icon="alert-circle" tone="error" message={deniedMessage} />}
       {!!error && <FeatureStatus icon="alert-circle" tone="error" message={error} />}
-      <FeatureButton label={needsSettings ? "Abrir Ajustes" : "Permitir cámara"} icon="camera" disabled={busy} onPress={() => setVisible(true)} />
+      <FeatureButton
+        label={onOpenSettings ? "Abrir Ajustes" : buttonLabel}
+        icon={onOpenSettings ? "settings" : icon}
+        disabled={busy}
+        onPress={onOpenSettings || (() => setVisible(true))}
+      />
       <AppModal
         visible={visible}
-        icon="camera"
-        title="Permite el acceso a la cámara"
-        message={needsSettings ? "En Ajustes, activa Cámara para Al Toque." : reason}
-        primaryLabel={needsSettings ? "Abrir Ajustes" : "Permitir"}
+        icon={icon}
+        title={dialogTitle}
+        message={reason}
+        primaryLabel="Permitir"
         secondaryLabel="Ahora no"
-        onPrimary={() => { close(); allow(); }}
+        onPrimary={async () => {
+          if (confirming.current) return;
+          confirming.current = true;
+          try {
+            await allow();
+          } finally {
+            confirming.current = false;
+            close();
+          }
+        }}
         onSecondary={close}
         onClose={close}
       />

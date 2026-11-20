@@ -18,7 +18,7 @@ import RemindersScreen from "../screens/RemindersScreen";
 import useReminderNavigation from "../hooks/useReminderNavigation";
 
 export default function AppNavigator() {
-  const { currentScreen, setCurrentScreen, user, loading, isStorageReady, pinState, isAppActive } = useAuth();
+  const { currentScreen, setCurrentScreen, user, loading, isStorageReady, pinState, isAppActive, isRequestingPermission } = useAuth();
   const openHome = useCallback(() => setCurrentScreen("HOME"), [setCurrentScreen]);
   const openHistory = useCallback(() => setCurrentScreen("HISTORY"), [setCurrentScreen]);
   const openNotifications = useCallback(() => setCurrentScreen("REMINDERS"), [setCurrentScreen]);
@@ -30,7 +30,8 @@ export default function AppNavigator() {
   const renderScreen = () => {
     if (loading || (user && !isStorageReady)) return <SplashScreen />;
     if (user) {
-      if (!isAppActive || pinState.uid !== user.uid || ["loading", "initializing"].includes(pinState.status)) return <SplashScreen />;
+      if (pinState.uid !== user.uid || ["loading", "initializing"].includes(pinState.status)) return <SplashScreen />;
+      if (!isAppActive && !isRequestingPermission) return <SplashScreen />;
       if (pinState.status !== "unlocked") {
         if (currentScreen === "SUPPORT") return <SupportScreen />;
         if (currentScreen === "RECOVERY_EMAIL") return <RecoveryEmailScreen />;
@@ -77,7 +78,7 @@ export default function AppNavigator() {
     }
   };
 
-  return <View style={styles.container}>{renderScreen()}</View>;
+  return <View style={styles.container} pointerEvents={isRequestingPermission && !isAppActive ? "none" : "auto"}>{renderScreen()}</View>;
 }
 
 const styles = StyleSheet.create({

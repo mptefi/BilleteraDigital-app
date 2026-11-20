@@ -6,11 +6,23 @@ export const activityCategories = {
 };
 
 const examples = [
-  { category: "promo", title: "Cashback del viernes", message: "Conoce el cashback de los viernes en locales seleccionados." },
-  { category: "payment", title: "Pago confirmado", message: "Un pago por QR aparecerá aquí cuando confirmes la simulación." },
-  { category: "transfer", title: "Transferencia recibida", message: "Al confirmar un QR de ingreso, verás el abono en esta bandeja." },
-  { category: "security", title: "Movimiento inusual", message: "Este aviso de prueba muestra cómo podrías revisar una operación que no reconoces." },
+  { category: "payment", title: "Pago en Cafetería Demo", message: "Pago con QR · S/ 12.50" },
+  { category: "transfer", title: "Transferencia de María Demo", message: "Transferencia por QR · S/ 12.50" },
+  { category: "security", title: "Alertas de seguridad", message: "Aquí te avisaremos sobre actividad que debas revisar." },
 ];
+
+export function demoPromoActivity(receivedAt) {
+  return {
+    id: "demo-promo-bembos",
+    category: "promo",
+    title: "¡Un combo Bembos con 20 % de descuento!",
+    message: "Imagina un descuento pagando con Al Toque. Oferta no canjeable.",
+    date: new Intl.DateTimeFormat("es-PE", {
+      dateStyle: "medium", timeStyle: "short", timeZone: "America/Lima",
+    }).format(receivedAt),
+    example: true,
+  };
+}
 
 export function movementActivity(movement) {
   const incoming = movement.type === "income";
@@ -24,11 +36,12 @@ export function movementActivity(movement) {
   };
 }
 
-export function notificationActivity(transactions) {
+export function notificationActivity(transactions, promoReceivedAt) {
   const movements = transactions.filter((item) => item.simulation === true).map(movementActivity);
   const activeCategories = new Set(movements.map((item) => item.category));
   return [
     ...movements,
+    ...(promoReceivedAt ? [demoPromoActivity(promoReceivedAt)] : []),
     ...examples.filter((item) => !activeCategories.has(item.category))
       .map((item) => ({ ...item, id: `example-${item.category}`, example: true })),
   ];
