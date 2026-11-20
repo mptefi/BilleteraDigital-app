@@ -3,7 +3,7 @@ import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from "
 import { Feather } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 import FeatureScreen, { FeatureButton, FeatureStatus, featureStyles } from "../components/FeatureScreen";
-import NotificationInbox, { NotificationCategories } from "../components/NotificationInbox";
+import NotificationInbox from "../components/NotificationInbox";
 import AppModal from "../components/AppModal";
 import { useAuth } from "../context/AuthContext";
 import useFeaturePermission from "../hooks/useFeaturePermission";
@@ -64,9 +64,7 @@ function NotificationCenter({ uid, onOpenHistory }) {
           }}
           onSecondary={() => setPermissionModal(false)}
           onClose={() => setPermissionModal(false)}
-        >
-          <NotificationCategories />
-        </AppModal>
+        />
       </View>
     );
   }

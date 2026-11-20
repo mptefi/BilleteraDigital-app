@@ -9,19 +9,6 @@ import { COLORS } from "../theme/colors";
 
 const filters = [["all", "Todas"], ...Object.entries(activityCategories).map(([key, value]) => [key, value.label])];
 
-export function NotificationCategories() {
-  return (
-    <View style={styles.permissionCategories}>
-      {Object.entries(activityCategories).map(([category, { label, icon, color, background }]) => (
-        <View key={category} style={[styles.permissionTag, { backgroundColor: background }]}>
-          <Feather name={icon} size={15} color={color} />
-          <Text style={[styles.permissionTagText, { color }]}>{label}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 export default function NotificationInbox({ uid, transactions, onOpenHistory }) {
   const items = useMemo(() => notificationActivity(transactions), [transactions]);
   const [filter, setFilter] = useState("all");
@@ -132,7 +119,6 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: "700", color: COLORS.textPrimary },
   cardMessage: { fontSize: 14, lineHeight: 19, color: COLORS.textSecondary },
   metadata: { fontSize: 12, color: COLORS.textSecondary, marginTop: 3 },
-  permissionCategories: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginVertical: 4 },
   permissionTag: { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 12 },
   permissionTagText: { fontSize: 13, fontWeight: "700" },
 });
