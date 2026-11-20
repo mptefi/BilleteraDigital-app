@@ -91,6 +91,7 @@ test("Android prepara el canal y solicita el permiso de avisos con opciones nati
   let current = { granted: false, canAskAgain: true };
   const { requestReminderPermission } = load("src/services/reminders.js", {
     "react-native": { Platform: { OS: "android" } },
+    expo: { isRunningInExpoGo: () => false },
     "expo-constants": {},
     "expo-device": {},
     "./storage": {},
@@ -111,7 +112,40 @@ test("Android prepara el canal y solicita el permiso de avisos con opciones nati
   assert.equal((await requestReminderPermission()).granted, true);
   assert.deepEqual(calls, ["movements", "request"]);
   assert.equal((await requestReminderPermission()).granted, true);
-  assert.deepEqual(calls, ["movements", "request", "movements"]);
+  assert.deepEqual(calls, ["movements", "request"]);
+});
+
+test("Expo Go usa el canal predeterminado para activar, enviar y programar avisos", async () => {
+  let granted = false;
+  const requests = [];
+  const read = async () => ({ granted, canAskAgain: true });
+  const { requestReminderPermission, sendActivityNotification, scheduleReminder } = load("src/services/reminders.js", {
+    "react-native": { Platform: { OS: "android" } },
+    expo: { isRunningInExpoGo: () => true },
+    "expo-constants": {},
+    "expo-device": {},
+    "./storage": {
+      storageKeys: { movementReminder: "reminder" },
+      getStoredJson: async () => null,
+      removeStoredValue: async () => true,
+      setStoredJson: async () => true,
+    },
+    "./notificationActivity": load("src/services/notificationActivity.js"),
+    "expo-notifications": {
+      setNotificationHandler() {},
+      setNotificationChannelAsync: () => assert.fail("Expo Go no puede crear el canal personalizado"),
+      getPermissionsAsync: read,
+      requestPermissionsAsync: async () => { granted = true; return read(); },
+      SchedulableTriggerInputTypes: { TIME_INTERVAL: "timeInterval" },
+      scheduleNotificationAsync: async (request) => { requests.push(request); return "avisos"; },
+    },
+  });
+  assert.equal((await requestReminderPermission()).granted, true);
+  assert.equal(await sendActivityNotification("A", { category: "payment", title: "Pago" }), true);
+  assert.equal(requests[0].trigger, null);
+  await scheduleReminder("A", 5);
+  assert.equal(requests[1].trigger.seconds, 5);
+  assert.equal(Object.hasOwn(requests[1].trigger, "channelId"), false);
 });
 
 test("pantalla QR rechaza datos inválidos, evita lecturas duplicadas y confirma la simulación", async () => {
@@ -274,6 +308,7 @@ test("los avisos locales respetan el permiso, usan el canal correcto y ocultan e
   const channels = [];
   const { sendActivityNotification } = load("src/services/reminders.js", {
     "react-native": { Platform: { OS: "android" } },
+    expo: { isRunningInExpoGo: () => false },
     "expo-constants": {},
     "expo-device": {},
     "./storage": {},
@@ -419,6 +454,7 @@ test("recordatorio crea el canal y reemplaza o cancela solo la programación de 
   let channel;
   const { scheduleReminder, findReminder, cancelReminder } = load("src/services/reminders.js", {
     "react-native": { Platform: { OS: "android" } },
+    expo: { isRunningInExpoGo: () => false },
     "expo-constants": {},
     "expo-device": {},
     "./notificationActivity": load("src/services/notificationActivity.js"),

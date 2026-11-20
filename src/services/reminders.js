@@ -1,12 +1,15 @@
 import { Platform } from "react-native";
+import { isRunningInExpoGo } from "expo";
 import * as Notifications from "expo-notifications";
-import Constants, { ExecutionEnvironment } from "expo-constants";
+import Constants from "expo-constants";
 import { isDevice } from "expo-device";
 import { getStoredJson, setStoredJson, storageKeys, removeStoredValue } from "./storage";
 import { activityCategories } from "./notificationActivity";
 
 export const remindersSupported = Platform.OS === "android" || Platform.OS === "ios";
 export const movementChannel = "movements";
+const isExpoGo = isRunningInExpoGo();
+const usesCustomAndroidChannels = Platform.OS === "android" && !isExpoGo;
 const reminderKey = (uid) => `${storageKeys.movementReminder}/${uid}`;
 let reminderWork = Promise.resolve();
 
@@ -25,7 +28,7 @@ if (remindersSupported) {
 }
 
 async function prepareChannel() {
-  if (Platform.OS === "android") {
+  if (usesCustomAndroidChannels) {
     await Notifications.setNotificationChannelAsync(movementChannel, {
       name: "Recordatorios de movimientos",
       importance: Notifications.AndroidImportance.HIGH,
@@ -46,10 +49,10 @@ export async function readReminderPermission() {
 }
 
 export async function requestReminderPermission() {
-  await prepareChannel();
   const existing = await readReminderPermission();
   if (existing.granted || existing.canAskAgain === false) return existing;
 
+  await prepareChannel();
   const permission = await Notifications.requestPermissionsAsync({
     android: {},
     ios: { allowAlert: true, allowSound: true, allowBadge: true },
@@ -60,7 +63,7 @@ export async function requestReminderPermission() {
 export async function sendActivityNotification(uid, activity) {
   if (!remindersSupported || !(await readReminderPermission()).granted) return false;
   const channel = `altoque-${activity.category}`;
-  if (Platform.OS === "android") {
+  if (usesCustomAndroidChannels) {
     await Notifications.setNotificationChannelAsync(channel, {
       name: activityCategories[activity.category].label,
       importance: activity.category === "promo" ? Notifications.AndroidImportance.DEFAULT : Notifications.AndroidImportance.HIGH,
@@ -75,7 +78,7 @@ export async function sendActivityNotification(uid, activity) {
         route: !activity.example && ["payment", "transfer"].includes(activity.category) ? "movements" : "notifications",
       },
     },
-    trigger: Platform.OS === "android" ? { channelId: channel } : null,
+    trigger: usesCustomAndroidChannels ? { channelId: channel } : null,
   });
   return true;
 }
@@ -113,7 +116,7 @@ async function replaceReminder(uid, seconds) {
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
       seconds,
-      channelId: movementChannel,
+      ...(usesCustomAndroidChannels && { channelId: movementChannel }),
     },
   });
   if (!(await setStoredJson(reminderKey(uid), identifier))) {
@@ -124,7 +127,7 @@ async function replaceReminder(uid, seconds) {
 }
 
 export async function getDemoPushToken() {
-  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+  if (isExpoGo) {
     throw new Error("Abre el development build de Al Toque para obtener un token push.");
   }
   const projectId = Constants.easConfig?.projectId || Constants.expoConfig?.extra?.eas?.projectId;
